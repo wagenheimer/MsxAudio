@@ -2,7 +2,7 @@ using System;
 
 namespace Wagenheimer.MsxAudio.Mixing;
 
-/// <summary>Reverb estéreo curto (combs + allpass) usado pelo perfil "remaster".</summary>
+/// <summary>Short stereo reverb (combs + allpass) used by the "remaster" profile.</summary>
 public sealed class StereoReverb
 {
     private static readonly int[] CombDelays = { 1116, 1188, 1277, 1356 };
@@ -20,7 +20,7 @@ public sealed class StereoReverb
     private readonly int[] _allPassIndexL = new int[2];
     private readonly int[] _allPassIndexR = new int[2];
 
-    /// <summary>Cria o reverb para uma taxa de amostragem.</summary>
+    /// <summary>Creates the reverb for a sample rate.</summary>
     public StereoReverb(int sampleRate)
     {
         double scale = sampleRate / 44100.0;
@@ -37,7 +37,7 @@ public sealed class StereoReverb
         }
     }
 
-    /// <summary>Mistura o reverb nos buffers (in place).</summary>
+    /// <summary>Mixes the reverb into the buffers (in place).</summary>
     public void Process(float[] left, float[] right, int count, float mix)
     {
         const float feedback = 0.78f;

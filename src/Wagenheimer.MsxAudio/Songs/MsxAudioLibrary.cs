@@ -10,74 +10,74 @@ using Wagenheimer.MsxAudio.Vgm;
 
 namespace Wagenheimer.MsxAudio.Songs;
 
-/// <summary>Uma música ou efeito guardado numa biblioteca <c>.msxaudio</c>.</summary>
+/// <summary>A song or effect stored in a <c>.msxaudio</c> library.</summary>
 public sealed class MsxAudioSong
 {
-    /// <summary>Identificador estável (ex.: <c>stage_a</c>, <c>jump</c>).</summary>
+    /// <summary>Stable identifier (e.g. <c>stage_a</c>, <c>jump</c>).</summary>
     public string Id { get; set; } = string.Empty;
 
-    /// <summary>Nome para exibição.</summary>
+    /// <summary>Display name.</summary>
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>Entrada do VGM dentro do pacote.</summary>
+    /// <summary>VGM entry inside the package.</summary>
     public string Entry { get; set; } = string.Empty;
 
-    /// <summary>É música (true) ou efeito curto (false)?</summary>
+    /// <summary>Is it music (true) or a short effect (false)?</summary>
     public bool Music { get; set; } = true;
 
-    /// <summary>Toca em loop?</summary>
+    /// <summary>Does it loop?</summary>
     public bool Loop { get; set; }
 
-    /// <summary>Início do loop em segundos (quando <see cref="Loop"/>).</summary>
+    /// <summary>Loop start in seconds (when <see cref="Loop"/>).</summary>
     public double LoopStart { get; set; }
 
-    /// <summary>Duração do loop em segundos (quando <see cref="Loop"/>).</summary>
+    /// <summary>Loop duration in seconds (when <see cref="Loop"/>).</summary>
     public double LoopSeconds { get; set; }
 
-    /// <summary>Duração total capturada do VGM.</summary>
+    /// <summary>Total captured VGM duration.</summary>
     public double Seconds { get; set; }
 
-    /// <summary>Rótulos livres (ex.: <c>stage</c>, <c>menu</c>, <c>sfx</c>).</summary>
+    /// <summary>Free-form tags (e.g. <c>stage</c>, <c>menu</c>, <c>sfx</c>).</summary>
     public string[] Tags { get; set; } = Array.Empty<string>();
 
-    /// <summary>Id do som no original (ex.: o id de <c>432E</c>), quando conhecido.</summary>
+    /// <summary>Sound id in the original (e.g. the <c>432E</c> id), when known.</summary>
     public int? OriginalId { get; set; }
 }
 
-/// <summary>Manifesto do pacote.</summary>
+/// <summary>Package manifest.</summary>
 public sealed class MsxAudioManifest
 {
-    /// <summary>Versão do formato.</summary>
+    /// <summary>Format version.</summary>
     public string Format { get; set; } = "msxaudio/1";
 
-    /// <summary>Título da coleção.</summary>
+    /// <summary>Collection title.</summary>
     public string Title { get; set; } = string.Empty;
 
-    /// <summary>Origem (ROM, VGM, emulador...).</summary>
+    /// <summary>Origin (ROM, VGM, emulator...).</summary>
     public string? Source { get; set; }
 
-    /// <summary>Clock do PSG em Hz.</summary>
+    /// <summary>PSG clock in Hz.</summary>
     public double PsgClock { get; set; } = 1789772.5;
 
-    /// <summary>Clock do SCC em Hz (metade do clock "clássico" de 3579545).</summary>
+    /// <summary>SCC clock in Hz (half of the "classic" 3579545).</summary>
     public double SccClock { get; set; } = 1789772.5;
 
-    /// <summary>Músicas.</summary>
+    /// <summary>Songs.</summary>
     public List<MsxAudioSong> Songs { get; set; } = new();
 
-    /// <summary>Efeitos.</summary>
+    /// <summary>Effects.</summary>
     public List<MsxAudioSong> Clips { get; set; } = new();
 }
 
 /// <summary>
-/// Biblioteca de áudio do MSX (<c>.msxaudio</c>): um ZIP com o manifesto e os VGMs.
+/// MSX audio library (<c>.msxaudio</c>): a ZIP with the manifest and the VGMs.
 /// </summary>
 /// <remarks>
-/// Um pacote guarda as <b>escritas de registrador</b> (não áudio pronto): alguns KB por música e
-/// reprodução fiel em qualquer máquina. É o formato para <i>salvar</i> uma extração e para
-/// distribuí-la com um jogo.
+/// A package stores the <b>register writes</b> (not rendered audio): a few KB per song and faithful
+/// playback on any machine. It is the format used to <i>save</i> an extraction and to ship it with
+/// a game.
 ///
-/// <para>Estrutura:</para>
+/// <para>Layout:</para>
 /// <code>
 /// manifest.json
 /// songs/stage_a.vgm
@@ -89,26 +89,26 @@ public sealed class MsxAudioLibrary : IDisposable
     private readonly Dictionary<string, byte[]> _entries = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, VgmFile> _loaded = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Cria uma biblioteca vazia.</summary>
+    /// <summary>Creates an empty library.</summary>
     public MsxAudioLibrary(string title = "MSX audio")
     {
         Manifest = new MsxAudioManifest { Title = title };
     }
 
-    /// <summary>Manifesto (músicas, efeitos, clocks).</summary>
+    /// <summary>Manifest (songs, effects, clocks).</summary>
     public MsxAudioManifest Manifest { get; }
 
-    /// <summary>Músicas da biblioteca.</summary>
+    /// <summary>Songs in the library.</summary>
     public IReadOnlyList<MsxAudioSong> Songs => Manifest.Songs;
 
-    /// <summary>Efeitos da biblioteca.</summary>
+    /// <summary>Effects in the library.</summary>
     public IReadOnlyList<MsxAudioSong> Clips => Manifest.Clips;
 
-    /// <summary>Procura uma música ou efeito pelo id.</summary>
+    /// <summary>Finds a song or effect by id.</summary>
     public MsxAudioSong? Find(string id) =>
         Manifest.Songs.Concat(Manifest.Clips).FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Adiciona um VGM como música.</summary>
+    /// <summary>Adds a VGM as a song.</summary>
     public MsxAudioSong AddSong(
         string id,
         string name,
@@ -139,7 +139,7 @@ public sealed class MsxAudioLibrary : IDisposable
         return song;
     }
 
-    /// <summary>Adiciona um VGM como efeito.</summary>
+    /// <summary>Adds a VGM as an effect.</summary>
     public MsxAudioSong AddClip(string id, string name, VgmFile vgm, int? originalId = null, params string[] tags)
     {
         var clip = new MsxAudioSong
@@ -160,18 +160,18 @@ public sealed class MsxAudioLibrary : IDisposable
         return clip;
     }
 
-    /// <summary>Adiciona um arquivo arbitrário (ex.: um WAV de sample, um readme).</summary>
+    /// <summary>Adds an arbitrary file (e.g. a sample WAV, a readme).</summary>
     public void AddEntry(string entry, byte[] data) => _entries[entry] = data;
 
-    /// <summary>Lê um arquivo do pacote (ou <c>null</c>).</summary>
+    /// <summary>Reads a file from the package (or <c>null</c>).</summary>
     public byte[]? ReadEntry(string entry) => _entries.TryGetValue(entry, out var data) ? data : null;
 
-    /// <summary>Carrega o VGM de uma música (com cache).</summary>
+    /// <summary>Loads a song's VGM (cached).</summary>
     public VgmFile LoadVgm(MsxAudioSong song)
     {
         if (_loaded.TryGetValue(song.Entry, out var cached)) return cached;
         if (!_entries.TryGetValue(song.Entry, out var data))
-            throw new InvalidDataException($"entrada '{song.Entry}' não existe no pacote");
+            throw new InvalidDataException($"entry '{song.Entry}' does not exist in the package");
 
         var vgm = VgmFile.Parse(data, song.Id);
         if (!vgm.HasLoop && song.Loop && song.LoopSeconds > 0)
@@ -180,7 +180,7 @@ public sealed class MsxAudioLibrary : IDisposable
         return vgm;
     }
 
-    /// <summary>Salva o pacote em disco.</summary>
+    /// <summary>Saves the package to disk.</summary>
     public void Save(string path)
     {
         string? directory = Path.GetDirectoryName(Path.GetFullPath(path));
@@ -190,7 +190,7 @@ public sealed class MsxAudioLibrary : IDisposable
         Save(stream);
     }
 
-    /// <summary>Salva o pacote num stream (formato ZIP).</summary>
+    /// <summary>Saves the package to a stream (ZIP format).</summary>
     public void Save(Stream stream)
     {
         using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
@@ -199,14 +199,14 @@ public sealed class MsxAudioLibrary : IDisposable
             WriteEntry(archive, name, data);
     }
 
-    /// <summary>Carrega um pacote do disco.</summary>
+    /// <summary>Loads a package from disk.</summary>
     public static MsxAudioLibrary Load(string path)
     {
         using var stream = File.OpenRead(path);
         return Load(stream);
     }
 
-    /// <summary>Carrega um pacote de um stream (formato ZIP).</summary>
+    /// <summary>Loads a package from a stream (ZIP format).</summary>
     public static MsxAudioLibrary Load(Stream stream)
     {
         using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true);

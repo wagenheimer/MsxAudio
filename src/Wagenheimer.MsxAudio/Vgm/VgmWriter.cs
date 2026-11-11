@@ -5,14 +5,14 @@ using System.Text;
 
 namespace Wagenheimer.MsxAudio.Vgm;
 
-/// <summary>Escreve um <see cref="VgmFile"/> de volta no formato VGM (bytes).</summary>
+/// <summary>Writes a <see cref="VgmFile"/> back to the VGM byte format.</summary>
 /// <remarks>
-/// Usado para empacotar músicas extraídas de outras fontes (por exemplo, um driver emulado) no
-/// mesmo formato que o openMSX gera — assim tudo (loop, render, comparação) usa um caminho só.
+/// Used to pack songs extracted from other sources (for example an emulated driver) into the same
+/// format openMSX produces, so everything (loop, render, comparison) uses a single path.
 /// </remarks>
 public static class VgmWriter
 {
-    /// <summary>Serializa o VGM (cabeçalho 1.51 + comandos + fim).</summary>
+    /// <summary>Serializes the VGM (1.51 header + commands + end marker).</summary>
     public static byte[] Write(VgmFile vgm, int totalSamples = 0, double? loopStartSeconds = null, double? loopSeconds = null)
     {
         ArgumentNullException.ThrowIfNull(vgm);
@@ -61,12 +61,12 @@ public static class VgmWriter
         data[2] = (byte)'m';
         data[3] = (byte)' ';
         WriteU32(data, 0x08, 0x161);
-        WriteU32(data, 0x18, (uint)(totalSamples > 0 ? totalSamples : current));
+        WriteU32(data, 0x18, (uint)(totalSamples > 0 ? totalSamples : vgm.TotalSamples > 0 ? vgm.TotalSamples : current));
         WriteU32(data, 0x34, headerSize - 0x34);
         WriteU32(data, 0x74, (uint)Math.Round(vgm.AyClock));
 
-        // O loop NÃO vai no cabeçalho: o VGM só guarda um único offset de loop por arquivo e o
-        // nosso loop é por música (fica no manifesto do pacote .msxaudio). Deixar 0 é o correto.
+        // The loop does NOT go in the header: VGM stores a single loop offset per file and our
+        // loop is per song (it lives in the .msxaudio manifest). Leaving it at 0 is correct.
         _ = loopSample;
         _ = loopLength;
 

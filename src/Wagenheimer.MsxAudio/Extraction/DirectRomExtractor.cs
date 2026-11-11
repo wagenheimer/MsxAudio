@@ -19,7 +19,7 @@ namespace Wagenheimer.MsxAudio.Extraction;
 /// <para>The <see cref="MiniMsx"/> boots the cartridge, then each id is captured by calling the game's
 /// "play sound" routine and running the interrupt handler at 60 Hz for the requested duration.
 /// The captured PSG/SCC register writes become a VGM (and therefore a <c>.msxaudio</c> entry),
-/// exactly like the openMSX path.
+/// exactly like the openMSX path.</para>
 /// </remarks>
 public static class DirectRomExtractor
 {

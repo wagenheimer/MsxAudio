@@ -3,15 +3,15 @@ using System;
 namespace Wagenheimer.MsxAudio.Chips;
 
 /// <summary>
-/// Emulador do Konami SCC (K051649), o chip de 5 canais de wavetable dos cartuchos MSX.
+/// Konami SCC (K051649) emulator — the 5-channel wavetable chip of MSX cartridges.
 /// </summary>
 /// <remarks>
-/// Porte fiel do núcleo <c>k051649</c> do MAME/libvgm: mesma tabela de 32 bytes por canal,
-/// mesmo acumulador de fase de 16 bits, mesmo reset de contador na escrita da frequência e
-/// o mesmo corte de canais com período &lt; 9. A saída é por canal, sem mixagem.
+/// Faithful port of the MAME/libvgm <c>k051649</c> core: same 32-byte wave table per channel, same
+/// 16-bit phase accumulator, same counter reset on frequency writes, same "period &lt; 9 stops the
+/// channel" rule. Output is per channel, without mixing.
 ///
-/// <para>O clock usado nos VGMs do MSX é <b>1789772,5 Hz</b> (metade do clock "clássico" de
-/// 3579545), o que reproduz a fórmula de hardware <c>f = clock / (32 * (periodo + 1))</c>.</para>
+/// <para>The MSX VGM uses a clock of <b>1789772.5 Hz</b> (half of the "classic" 3579545), which
+/// reproduces the hardware formula <c>f = clock / (32 * (period + 1))</c>.</para>
 /// </remarks>
 public sealed class KonamiScc
 {
@@ -32,9 +32,9 @@ public sealed class KonamiScc
 
     private int _test;
 
-    /// <summary>Cria o SCC para uma taxa de amostragem interna.</summary>
-    /// <param name="clock">Clock do chip em Hz (MSX: 1789772,5).</param>
-    /// <param name="sampleRate">Taxa de amostragem interna em Hz.</param>
+    /// <summary>Creates the SCC for an internal sample rate.</summary>
+    /// <param name="clock">Chip clock in Hz (MSX: 1789772.5).</param>
+    /// <param name="sampleRate">Internal sample rate in Hz.</param>
     public KonamiScc(double clock = 1789772.5, double sampleRate = 192000)
     {
         if (clock <= 0) throw new ArgumentOutOfRangeException(nameof(clock));
@@ -43,20 +43,20 @@ public sealed class KonamiScc
         Reset();
     }
 
-    /// <summary>Clock configurado (Hz).</summary>
-    public double Clock { get; private set; }
+    /// <summary>Configured clock (Hz).</summary>
+    public double Clock { get; }
 
-    /// <summary>Taxa interna configurada (Hz).</summary>
+    /// <summary>Configured internal sample rate (Hz).</summary>
     public double SampleRate { get; private set; }
 
-    /// <summary>Recalcula a taxa de amostragem usada para gerar as amostras.</summary>
+    /// <summary>Changes the sample rate used to generate samples.</summary>
     public void SetSampleRate(double sampleRate)
     {
         if (sampleRate <= 0) throw new ArgumentOutOfRangeException(nameof(sampleRate));
         SampleRate = sampleRate;
     }
 
-    /// <summary>Volta ao estado de ligar (sem som).</summary>
+    /// <summary>Returns to the power-on state (no sound).</summary>
     public void Reset()
     {
         Array.Clear(_wave);
@@ -69,9 +69,9 @@ public sealed class KonamiScc
     }
 
     /// <summary>
-    /// Escrita no chip. <paramref name="port"/> é a "página" de registradores usada pelo VGM:
-    /// 0 = wave RAM (0x00..0x7F), 1 = frequência (0x00..0x09), 2 = volume (0x00..0x04),
-    /// 3 = key on/off, 4 = wave do canal 5, 5 = test.
+    /// Chip write. <paramref name="port"/> is the register "page" used by VGM:
+    /// 0 = wave RAM (0x00..0x7F), 1 = frequency (0x00..0x09), 2 = volume (0x00..0x04),
+    /// 3 = key on/off, 4 = channel 5 wave, 5 = test.
     /// </summary>
     public void Write(int port, int register, int value)
     {
@@ -100,12 +100,12 @@ public sealed class KonamiScc
 
     private void WriteWave(int offset, int value)
     {
-        // wave RAM é somente leitura quando o test register manda (bits 6/7)
+        // wave RAM is read-only when the test register says so (bits 6/7)
         if ((_test & 0x40) != 0 || ((_test & 0x80) != 0 && offset >= 0x60)) return;
 
         if (offset >= 0x60)
         {
-            // o canal 5 compartilha a wave RAM com o canal 4 (índice 3)
+            // channel 5 shares the wave RAM with channel 4 (index 3)
             _wave[3 * 32 + (offset & 0x1f)] = (sbyte)value;
             _wave[4 * 32 + (offset & 0x1f)] = (sbyte)value;
         }
@@ -153,29 +153,29 @@ public sealed class KonamiScc
         }
     }
 
-    /// <summary>Silencia um canal (usado pelo mixer para perfis alternativos).</summary>
+    /// <summary>Mutes a channel (used by the mixer for alternative profiles).</summary>
     public void SetMute(int channel, bool muted)
     {
         if (channel is < 0 or >= Channels) return;
         _channels[channel].Muted = muted ? 1 : 0;
     }
 
-    /// <summary>Renderiza um bloco nos 5 buffers de canal.</summary>
+    /// <summary>Renders a block into the five channel buffers.</summary>
     public void Render(float[][] channels, int count) => Render(channels, 0, count);
 
-    /// <summary>Renderiza <paramref name="count"/> amostras a partir de <paramref name="offset"/>.</summary>
+    /// <summary>Renders <paramref name="count"/> samples from <paramref name="offset"/>.</summary>
     public void Render(float[][] channels, int offset, int count)
     {
         if (channels.Length < Channels)
-            throw new ArgumentException("são necessários 5 buffers de canal", nameof(channels));
+            throw new ArgumentException("five channel buffers are required", nameof(channels));
 
         for (int ch = 0; ch < Channels; ch++)
         {
             if (channels[ch].Length < offset + count)
-                throw new ArgumentException("buffer de canal menor que a contagem pedida", nameof(count));
+                throw new ArgumentException("channel buffer smaller than the requested count", nameof(count));
         }
 
-        // Passo de fase por amostra: mesmo cálculo do k051649 (mclock << 16 / ((freq+1) * rate/2)).
+        // Phase step per sample: same calculation as k051649 (mclock << 16 / ((freq+1) * rate/2)).
         Span<uint> steps = stackalloc uint[Channels];
         for (int ch = 0; ch < Channels; ch++)
         {
@@ -203,10 +203,10 @@ public sealed class KonamiScc
                     if (c.Key)
                     {
                         int offs = (int)(c.Counter >> FreqBits) & 0x1f;
-                        // 0x80 [wave] * 0x0F [volume] -> +-0x780 por canal
+                        // 0x80 [wave] * 0x0F [volume] -> +-0x780 per channel
                         int sample = _wave[ch * 32 + offs] * c.Volume;
                         sample >>= 4;
-                        value = sample * 32; // escala final do núcleo (256/8)
+                        value = sample * 32; // core's final scaling (256/8)
                     }
                 }
 

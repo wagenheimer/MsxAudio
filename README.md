@@ -186,6 +186,36 @@ tools/MsxAudioTool/                   CLI
 tests/Wagenheimer.MsxAudio.Tests/     testes (chips, VGM, pacote, motor)
 ```
 
+## Status
+
+| Area | State |
+| :--- | :--- |
+| PSG + SCC emulation | ✅ validated against openMSX (LTAS correlation 0.998) |
+| VGM import/export, loop detection | ✅ |
+| `.msxaudio` package | ✅ |
+| Streaming engine + sample player | ✅ (parity test with the offline renderer) |
+| MonoGame bridge | ✅ |
+| ROM extraction via openMSX | ✅ (bit-exact reference path) |
+| ROM extraction in process | 🧪 experimental (tempo ~6% off; VDP vblank not modelled) |
+| Remaster profile (stereo/reverb) | ✅ |
+
+### Roadmap
+
+1. Model the VDP vblank flag/status and the BIOS interrupt chain so `extract-direct` matches the
+   hardware cadence (then loop detection works and no external emulator is needed).
+2. A `play` CLI command that streams through `MsxAudioEngine` (live preview).
+3. Optional `SoundEffect`-based player for projects that cannot use `DynamicSoundEffectInstance`.
+
+## Tests
+
+```bash
+dotnet test MsxAudio.slnx
+```
+
+Covers chip frequencies (PSG/SCC formulas), VGM parse/write round-trip, loop detection, package
+IO, the streaming engine (loop continuity, sample voices, volume), streaming vs offline parity, the
+built-in MSX machine (mapper, PSG/SCC capture, id pass-through) and WAV decoding.
+
 ## Aviso
 
 O jogo, a arte e as músicas de MSX pertencem aos seus autores (a Konami, no caso do King's Valley).

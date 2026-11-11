@@ -12,7 +12,7 @@ using Wagenheimer.MsxAudio.Vgm;
 
 namespace Wagenheimer.MsxAudio.Tool;
 
-/// <summary>CLI do pacote: importar VGMs, extrair de uma ROM, ouvir/exportar e comparar.</summary>
+/// <summary>Package CLI: import VGMs, extract from a ROM, render/verify and unpack.</summary>
 internal static class Program
 {
     private static int Main(string[] args)
@@ -40,7 +40,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"erro: {ex.Message}");
+            Console.Error.WriteLine($"error: {ex.Message}");
             return 2;
         }
     }
@@ -48,49 +48,53 @@ internal static class Program
     private static void PrintHelp()
     {
         Console.WriteLine("""
-            MsxAudioTool — áudio de MSX (PSG + SCC) em pacotes .msxaudio
+            MsxAudioTool - MSX audio (PSG + SCC) in .msxaudio packages
 
-            uso:
-              import <pasta-vgm> <saida.msxaudio> [--title T] [--clips]
-                    converte VGMs em um pacote (detecta loop das músicas)
-              extract <rom> <saida.msxaudio> [--profile perfil.json] [--openmsx caminho]
-                    dirige o openMSX para gravar os VGMs de uma ROM e monta o pacote
-              info <pacote.msxaudio>
-                    lista músicas/efeitos, loops e clocks
-              render <pacote.msxaudio> <id|all> <saida> [--profile original|stereo|remaster] [--rate 48000]
-                    renderiza uma música/efeito (WAV) — "all" gera uma pasta
-              verify <vgm> <captura.wav>
-                    compara o render com uma captura do emulador (correlação/RMS/offset)
-              unpack <pacote.msxaudio> <pasta>
-                    extrai os VGMs + manifest.json do pacote
+            usage:
+              import <vgm-dir> <out.msxaudio> [--title T] [--clips]
+                    convert VGMs into a package (detects song loops)
+              extract <rom> <out.msxaudio> --profile profile.json [--openmsx path]
+                    drive openMSX to record a ROM's VGMs and build the package
+              extract-direct <rom> <out.msxaudio> --profile profile.json
+                    run the cartridge driver in process (no external emulator, experimental)
+              probe <rom>
+                    boot the ROM in the built-in machine and dump the hook state (diagnostics)
+              info <package.msxaudio>
+                    list songs/effects, loops and clocks
+              render <package.msxaudio> <id|all> <out-dir-or-file> [--profile original|stereo|remaster] [--rate 48000]
+                    render one song/effect to WAV - "all" writes a folder
+              verify <vgm> <capture.wav>
+                    compare the render with an emulator capture (correlation/RMS/offset)
+              unpack <package.msxaudio> <dir>
+                    extract the VGMs + manifest.json from the package
 
-            perfis de mixagem: original (fiel), stereo (canais espalhados), remaster (reverb + filtros)
+            mixing profiles: original (faithful), stereo (spread channels), remaster (reverb + filters)
             """);
     }
 
     private static int Unknown(string command)
     {
-        Console.Error.WriteLine($"comando desconhecido: {command}");
+        Console.Error.WriteLine($"unknown command: {command}");
         return 1;
     }
 
     private static int Info(string[] args)
     {
-        if (args.Length < 1) return Usage("info <pacote.msxaudio>");
+        if (args.Length < 1) return Usage("info <package.msxaudio>");
 
         using var library = MsxAudioLibrary.Load(args[0]);
         Console.WriteLine($"{library.Manifest.Title}  ({library.Manifest.Format})");
         if (!string.IsNullOrEmpty(library.Manifest.Source))
-            Console.WriteLine($"origem: {library.Manifest.Source}");
+            Console.WriteLine($"source: {library.Manifest.Source}");
         Console.WriteLine($"PSG {library.Manifest.PsgClock:F1} Hz | SCC {library.Manifest.SccClock:F1} Hz");
-        Console.WriteLine($"\nmúsicas ({library.Songs.Count}):");
+        Console.WriteLine($"\nsongs ({library.Songs.Count}):");
         foreach (var song in library.Songs)
         {
-            string loop = song.Loop ? $"loop {song.LoopStart:F3}s + {song.LoopSeconds:F3}s" : "sem loop";
+            string loop = song.Loop ? $"loop {song.LoopStart:F3}s + {song.LoopSeconds:F3}s" : "no loop";
             Console.WriteLine($"  {song.Id,-16} {song.Name,-24} {song.Seconds,7:F2}s  {loop}");
         }
 
-        Console.WriteLine($"\nefeitos ({library.Clips.Count}):");
+        Console.WriteLine($"\neffects ({library.Clips.Count}):");
         foreach (var clip in library.Clips)
             Console.WriteLine($"  {clip.Id,-16} {clip.Name,-24} {clip.Seconds,7:F2}s");
         return 0;
@@ -98,7 +102,7 @@ internal static class Program
 
     private static int Import(string[] args)
     {
-        if (args.Length < 2) return Usage("import <pasta-vgm> <saida.msxaudio> [--title T] [--clips]");
+        if (args.Length < 2) return Usage("import <vgm-dir> <out.msxaudio> [--title T] [--clips]");
 
         string directory = args[0];
         string output = args[1];
@@ -108,19 +112,15 @@ internal static class Program
         var library = VgmImporter.Import(directory, title, music: !clips, log: Console.WriteLine);
         library.Manifest.Source = directory;
         library.Save(output);
-        Console.WriteLine($"{library.Songs.Count} músicas, {library.Clips.Count} efeitos -> {output}");
+        Console.WriteLine($"{library.Songs.Count} songs, {library.Clips.Count} effects -> {output}");
         return 0;
     }
 
     private static int Extract(string[] args)
     {
-        if (args.Length < 2) return Usage("extract <rom> <saida.msxaudio> [--profile perfil.json] [--openmsx caminho]");
+        if (args.Length < 2) return Usage("extract <rom> <out.msxaudio> --profile profile.json [--openmsx path]");
 
-        string profilePath = Value(args, "--profile") ?? throw new ArgumentException("informe --profile perfil.json");
-        var profile = JsonSerializer.Deserialize<RomExtractionProfile>(File.ReadAllText(profilePath),
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-            ?? throw new InvalidDataException("perfil inválido");
-
+        var profile = LoadProfile(args);
         var options = new RomExtractionOptions
         {
             RomPath = args[0],
@@ -131,7 +131,20 @@ internal static class Program
 
         var result = OpenMsxRomExtractor.Extract(options, Console.WriteLine);
         result.Library.Save(args[1]);
-        Console.WriteLine($"{result.Library.Songs.Count} músicas, {result.Library.Clips.Count} efeitos -> {args[1]}");
+        Console.WriteLine($"{result.Library.Songs.Count} songs, {result.Library.Clips.Count} effects -> {args[1]}");
+        return 0;
+    }
+
+    private static int ExtractDirect(string[] args)
+    {
+        if (args.Length < 2) return Usage("extract-direct <rom> <out.msxaudio> --profile profile.json");
+
+        var profile = LoadProfile(args);
+        var options = new RomExtractionOptions { RomPath = args[0], Profile = profile };
+
+        var result = DirectRomExtractor.Extract(options, Console.WriteLine);
+        result.Library.Save(args[1]);
+        Console.WriteLine($"{result.Library.Songs.Count} songs, {result.Library.Clips.Count} effects -> {args[1]}");
         return 0;
     }
 
@@ -147,34 +160,14 @@ internal static class Program
         foreach (var (address, value) in machine.Trace)
             Console.WriteLine($"  {address:X4} <- {value:X2}");
 
-        for (ushort address = 0xFEDA; address <= 0xFEDC; address++)
-            Console.Write($"{machine.Memory(address):X2} ");
-        Console.WriteLine(" <- H.STKE");
-
         for (int i = 0; i < 5; i++) machine.Frame();
         Console.WriteLine($"after 5 frames: H.TIMI={machine.InterruptHook:X4}, PC={machine.Pc:X4}");
         return 0;
     }
 
-    private static int ExtractDirect(string[] args)
-    {
-        if (args.Length < 2) return Usage("extract-direct <rom> <out.msxaudio> --profile profile.json");
-
-        string profilePath = Value(args, "--profile") ?? throw new ArgumentException("missing --profile profile.json");
-        var profile = JsonSerializer.Deserialize<RomExtractionProfile>(File.ReadAllText(profilePath),
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-            ?? throw new InvalidDataException("invalid profile");
-
-        var options = new RomExtractionOptions { RomPath = args[0], Profile = profile };
-        var result = DirectRomExtractor.Extract(options, Console.WriteLine);
-        result.Library.Save(args[1]);
-        Console.WriteLine($"{result.Library.Songs.Count} songs, {result.Library.Clips.Count} effects -> {args[1]}");
-        return 0;
-    }
-
     private static int Render(string[] args)
     {
-        if (args.Length < 3) return Usage("render <pacote.msxaudio> <id|all> <saida> [--profile ...] [--rate 48000]");
+        if (args.Length < 3) return Usage("render <package.msxaudio> <id|all> <out> [--profile ...] [--rate 48000]");
 
         using var library = MsxAudioLibrary.Load(args[0]);
         var profile = AudioProfile.ByName(Value(args, "--profile"));
@@ -183,10 +176,10 @@ internal static class Program
 
         if (!args[1].Equals("all", StringComparison.OrdinalIgnoreCase))
         {
-            var song = library.Find(args[1]) ?? throw new ArgumentException($"id '{args[1]}' não existe");
+            var song = library.Find(args[1]) ?? throw new ArgumentException($"id '{args[1]}' does not exist");
             var audio = RenderSong(library, song, profile, rate);
             Wav.Write(target, audio);
-            Console.WriteLine($"{song.Id}: {audio.Seconds:F2}s, pico {audio.Peak:F3} -> {target}");
+            Console.WriteLine($"{song.Id}: {audio.Seconds:F2}s, peak {audio.Peak:F3} -> {target}");
             return 0;
         }
 
@@ -195,7 +188,7 @@ internal static class Program
         {
             var audio = RenderSong(library, song, profile, rate);
             Wav.Write(Path.Combine(target, song.Id + ".wav"), audio);
-            Console.WriteLine($"{song.Id,-16} {audio.Seconds,7:F2}s  pico {audio.Peak:F3}");
+            Console.WriteLine($"{song.Id,-16} {audio.Seconds,7:F2}s  peak {audio.Peak:F3}");
         }
 
         return 0;
@@ -203,7 +196,7 @@ internal static class Program
 
     private static int Verify(string[] args)
     {
-        if (args.Length < 2) return Usage("verify <vgm> <captura.wav>");
+        if (args.Length < 2) return Usage("verify <vgm> <capture.wav>");
 
         var vgm = VgmFile.Load(args[0]);
         if (!vgm.HasLoop)
@@ -215,7 +208,8 @@ internal static class Program
         var reference = WavDecoder.Decode(File.ReadAllBytes(args[1]));
         var mono = reference.ToMono();
         var profile = AudioProfile.Original;
-        var audio = MsxSoundRenderer.Render(vgm, profile, reference.SampleRate, 0, Math.Min(10, mono.Length / (double)reference.SampleRate));
+        var audio = MsxSoundRenderer.Render(vgm, profile, reference.SampleRate, 0,
+            Math.Min(10, mono.Length / (double)reference.SampleRate));
 
         int offset = (int)Math.Round((vgm.HasLoop ? vgm.LoopStartSeconds : 0) * reference.SampleRate);
         int window = Math.Min(audio.Frames, (int)(0.5 * reference.SampleRate));
@@ -238,13 +232,13 @@ internal static class Program
 
         double rmsA = Rms(audio, probe, window);
         double rmsB = Rms(mono, offset + probe + bestOffset, window);
-        Console.WriteLine($"correlação: {best:F4}  alinhamento: {bestOffset} amostras  RMS {rmsA:F4} / {rmsB:F4} (razão {rmsA / Math.Max(1e-9, rmsB):F3})");
+        Console.WriteLine($"correlation: {best:F4}  alignment: {bestOffset} samples  RMS {rmsA:F4} / {rmsB:F4} (ratio {rmsA / Math.Max(1e-9, rmsB):F3})");
         return 0;
     }
 
     private static int Unpack(string[] args)
     {
-        if (args.Length < 2) return Usage("unpack <pacote.msxaudio> <pasta>");
+        if (args.Length < 2) return Usage("unpack <package.msxaudio> <dir>");
 
         using var library = MsxAudioLibrary.Load(args[0]);
         Directory.CreateDirectory(args[1]);
@@ -259,7 +253,7 @@ internal static class Program
 
         File.WriteAllText(Path.Combine(args[1], "manifest.json"),
             JsonSerializer.Serialize(library.Manifest, new JsonSerializerOptions { WriteIndented = true }));
-        Console.WriteLine($"extraído em {args[1]}");
+        Console.WriteLine($"extracted to {args[1]}");
         return 0;
     }
 
@@ -276,9 +270,17 @@ internal static class Program
         return MsxSoundRenderer.Render(vgm, profile, rate, 0, MsxSoundRenderer.FindAudibleEnd(vgm));
     }
 
+    private static RomExtractionProfile LoadProfile(string[] args)
+    {
+        string profilePath = Value(args, "--profile") ?? throw new ArgumentException("missing --profile profile.json");
+        return JsonSerializer.Deserialize<RomExtractionProfile>(File.ReadAllText(profilePath),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidDataException("invalid profile");
+    }
+
     private static int Usage(string text)
     {
-        Console.Error.WriteLine("uso: " + text);
+        Console.Error.WriteLine("usage: " + text);
         return 1;
     }
 
@@ -323,7 +325,7 @@ internal static class Program
         return Math.Sqrt(sum / Math.Max(1, count));
     }
 
-    /// <summary>Gravação WAV PCM 16 bits.</summary>
+    /// <summary>Writes 16-bit PCM WAV.</summary>
     private static class Wav
     {
         public static void Write(string path, RenderedAudio audio)

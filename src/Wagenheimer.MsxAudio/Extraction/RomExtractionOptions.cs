@@ -4,104 +4,104 @@ using System.Text.Json.Serialization;
 
 namespace Wagenheimer.MsxAudio.Extraction;
 
-/// <summary>Uma tecla do MSX (linha/máscara da matriz) para navegar até a tela do som.</summary>
+/// <summary>An MSX key (matrix row/mask) used to navigate to the silent sound screen.</summary>
 public sealed class KeyStep
 {
-    /// <summary>Instante (segundos de emulação) em que a tecla é pressionada.</summary>
+    /// <summary>Emulated time (seconds) when the key is pressed.</summary>
     public double At { get; set; }
 
-    /// <summary>Linha da matriz (0..8).</summary>
+    /// <summary>Matrix row (0..8).</summary>
     public int Row { get; set; }
 
-    /// <summary>Máscara da tecla na linha.</summary>
+    /// <summary>Key mask on that row.</summary>
     public int Mask { get; set; }
 
-    /// <summary>Duração do toque (segundos).</summary>
+    /// <summary>How long the key is held (seconds).</summary>
     public double Duration { get; set; } = 0.12;
 
-    /// <summary>Se definido, digita esta sequência de letras (uma a cada <see cref="TypeDelay"/>).</summary>
+    /// <summary>When set, types this sequence of characters (one every <see cref="TypeDelay"/>).</summary>
     public string? Type { get; set; }
 
-    /// <summary>Intervalo entre letras digitadas.</summary>
+    /// <summary>Delay between typed characters.</summary>
     public double TypeDelay { get; set; } = 0.6;
 }
 
 /// <summary>
-/// Perfil de extração de uma ROM: como chegar numa tela silenciosa e qual rotina toca o som.
+/// Extraction profile for a ROM: how to reach a silent screen and which routine plays a sound.
 /// </summary>
 /// <remarks>
-/// O driver de som varia de jogo para jogo. Para os jogos da Konami na linha dos cartuchos SCC
-/// (como o King's Valley II) a rotina é <c>CALL 0x432E</c> com <c>A = id</c>; a "tela silenciosa"
-/// é alcançada com uma sequência de teclas. Este perfil descreve as duas coisas — é o que
-/// permite o extrator ser reutilizável em outros jogos sem recompilar nada.
+/// The sound driver differs from game to game. For Konami games on SCC cartridges (like King's
+/// Valley II) the routine is <c>CALL 0x432E</c> with <c>A = id</c>; the "silent screen" is reached
+/// with a key sequence. This profile describes both, which is what makes the extractor reusable
+/// across games without recompiling anything.
 /// </remarks>
 public sealed class RomExtractionProfile
 {
-    /// <summary>Nome do jogo/perfil.</summary>
+    /// <summary>Game/profile name.</summary>
     public string Name { get; set; } = "MSX";
 
-    /// <summary>Máquina do openMSX (ex.: <c>C-BIOS_MSX2_JP</c>).</summary>
+    /// <summary>openMSX machine (e.g. <c>C-BIOS_MSX2_JP</c>).</summary>
     public string Machine { get; set; } = "C-BIOS_MSX2_JP";
 
-    /// <summary>Tipo de cartucho (opcional; ex.: <c>KonamiSCC</c>).</summary>
+    /// <summary>Cartridge type (optional; e.g. <c>KonamiSCC</c>).</summary>
     public string? RomType { get; set; }
 
-    /// <summary>Endereço da rotina "toca som A" (CPU).</summary>
+    /// <summary>Address of the "play sound A" routine (CPU).</summary>
     public int SoundCallAddress { get; set; } = 0x432E;
 
-    /// <summary>Id que para todos os sons (usado antes de cada captura).</summary>
+    /// <summary>Id that stops every sound (used before each capture).</summary>
     public int StopId { get; set; } = 1;
 
-    /// <summary>Ids a capturar (na ordem).</summary>
+    /// <summary>Ids to capture (in order).</summary>
     public List<int> Ids { get; set; } = new();
 
-    /// <summary>Segundos de captura por id.</summary>
+    /// <summary>Capture seconds per id.</summary>
     public double SecondsPerId { get; set; } = 12;
 
-    /// <summary>Instante (emulação) em que a captura de cada id começa.</summary>
+    /// <summary>Emulated time when each id capture starts.</summary>
     public double FirstCaptureAt { get; set; } = 23;
 
-    /// <summary>Navegação até a tela silenciosa.</summary>
+    /// <summary>Navigation to the silent screen.</summary>
     public List<KeyStep> Navigation { get; set; } = new();
 
-    /// <summary>Ids que são música (capturados por mais tempo).</summary>
+    /// <summary>Ids that are music (captured for longer).</summary>
     public List<int> MusicIds { get; set; } = new();
 
-    /// <summary>Segundos de captura para os ids de música.</summary>
+    /// <summary>Capture seconds for music ids.</summary>
     public double SecondsPerSong { get; set; } = 120;
 
-    /// <summary>Duração específica por id (vence as regras gerais).</summary>
+    /// <summary>Per-id duration (overrides the general rules).</summary>
     public Dictionary<int, double> SecondsById { get; set; } = new();
 
-    /// <summary>Nomes amigáveis por id (opcional).</summary>
+    /// <summary>Friendly names per id (optional).</summary>
     public Dictionary<int, string> Names { get; set; } = new();
 }
 
-/// <summary>Opções do processo de extração.</summary>
+/// <summary>Options for the extraction process.</summary>
 public sealed class RomExtractionOptions
 {
-    /// <summary>ROM do jogo.</summary>
+    /// <summary>Game ROM.</summary>
     public string RomPath { get; set; } = string.Empty;
 
-    /// <summary>Caminho do executável do openMSX.</summary>
+    /// <summary>openMSX executable path.</summary>
     public string OpenMsxPath { get; set; } = "openmsx";
 
-    /// <summary>Perfil do jogo.</summary>
+    /// <summary>Game profile.</summary>
     public RomExtractionProfile Profile { get; set; } = new();
 
-    /// <summary>Pasta de trabalho (scripts, VGMs).</summary>
+    /// <summary>Working folder (scripts, VGMs).</summary>
     public string WorkDirectory { get; set; } = "msxaudio-work";
 
-    /// <summary>Duração máxima da sessão (segurança).</summary>
+    /// <summary>Maximum session duration (safety).</summary>
     public double TimeoutSeconds { get; set; } = 3600;
 }
 
-/// <summary>Resultado de uma extração: a biblioteca e os arquivos gerados.</summary>
+/// <summary>Extraction result: the library and the generated files.</summary>
 public sealed class ExtractionResult
 {
-    /// <summary>Biblioteca pronta para salvar em <c>.msxaudio</c>.</summary>
+    /// <summary>Library ready to be saved as <c>.msxaudio</c>.</summary>
     public Songs.MsxAudioLibrary Library { get; set; } = null!;
 
-    /// <summary>Arquivos VGM gerados (id → caminho).</summary>
+    /// <summary>Generated VGM files (id -> path).</summary>
     public Dictionary<int, string> VgmFiles { get; set; } = new();
 }

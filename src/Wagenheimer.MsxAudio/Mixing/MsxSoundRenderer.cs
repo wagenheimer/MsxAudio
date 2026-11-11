@@ -4,10 +4,10 @@ using Wagenheimer.MsxAudio.Vgm;
 
 namespace Wagenheimer.MsxAudio.Mixing;
 
-/// <summary>Áudio PCM pronto (16 bits, intercalado).</summary>
+/// <summary>Ready-to-use PCM audio (16-bit, interleaved).</summary>
 public sealed class RenderedAudio
 {
-    /// <summary>Cria o resultado.</summary>
+    /// <summary>Creates the result.</summary>
     public RenderedAudio(short[] samples, int sampleRate, int channels, float peak)
     {
         Samples = samples;
@@ -16,25 +16,25 @@ public sealed class RenderedAudio
         Peak = peak;
     }
 
-    /// <summary>Amostras PCM 16 bits intercaladas.</summary>
+    /// <summary>Interleaved 16-bit PCM samples.</summary>
     public short[] Samples { get; }
 
-    /// <summary>Taxa de amostragem (Hz).</summary>
+    /// <summary>Sample rate (Hz).</summary>
     public int SampleRate { get; }
 
-    /// <summary>Canais (1 = mono, 2 = estéreo).</summary>
+    /// <summary>Channels (1 = mono, 2 = stereo).</summary>
     public int Channels { get; }
 
-    /// <summary>Pico absoluto (0..1) depois do processamento.</summary>
+    /// <summary>Absolute peak (0..1) after processing.</summary>
     public float Peak { get; }
 
-    /// <summary>Quantidade de quadros (amostras por canal).</summary>
+    /// <summary>Frame count (samples per channel).</summary>
     public int Frames => Channels > 0 ? Samples.Length / Channels : 0;
 
-    /// <summary>Duração em segundos.</summary>
+    /// <summary>Duration in seconds.</summary>
     public double Seconds => SampleRate > 0 ? (double)Frames / SampleRate : 0;
 
-    /// <summary>PCM em bytes (little endian), no formato que o MonoGame espera.</summary>
+    /// <summary>PCM bytes (little endian), in the format MonoGame expects.</summary>
     public byte[] ToPcmBytes()
     {
         var bytes = new byte[Samples.Length * 2];
@@ -49,25 +49,25 @@ public sealed class RenderedAudio
 }
 
 /// <summary>
-/// Renderiza um VGM (PSG + SCC) em PCM, usando o <see cref="AudioProfile"/> escolhido.
+/// Renders a VGM (PSG + SCC) to PCM using the chosen <see cref="AudioProfile"/>.
 /// </summary>
 /// <remarks>
-/// O caminho é sempre o mesmo: os chips são emulados em <c>taxa × sobreamostragem</c> e a
-/// decimação usa um filtro FIR (sinc com janela Blackman), o que evita o serrilhado/aliasing
-/// de uma captura em 44,1 kHz. O estado do chip começa em zero e é percorrido desde o início
-/// do VGM, então cada trecho é reproduzido em fase com o original.
+/// The path is always the same: the chips are emulated at <c>rate × oversampling</c> and decimated
+/// with an FIR filter (Blackman-windowed sinc), which avoids the aliasing of a 44.1 kHz capture.
+/// The chip state starts from zero and is walked from the beginning of the VGM, so every section is
+/// reproduced in phase with the original.
 /// </remarks>
 public static class MsxSoundRenderer
 {
-    /// <summary>Clock do SCC usado pelos VGMs de MSX (Hz).</summary>
+    /// <summary>SCC clock used by MSX VGMs (Hz).</summary>
     public const double SccClock = 1789772.5;
 
-    /// <summary>Renderiza um intervalo do VGM.</summary>
-    /// <param name="vgm">VGM de origem.</param>
-    /// <param name="profile">Perfil de mixagem.</param>
-    /// <param name="sampleRate">Taxa de saída (padrão 48000).</param>
-    /// <param name="startSeconds">Instante inicial no VGM.</param>
-    /// <param name="durationSeconds">Duração (0 = até o fim da captura).</param>
+    /// <summary>Renders a range of the VGM.</summary>
+    /// <param name="vgm">Source VGM.</param>
+    /// <param name="profile">Mixing profile.</param>
+    /// <param name="sampleRate">Output rate (default 48000).</param>
+    /// <param name="startSeconds">Start instant in the VGM.</param>
+    /// <param name="durationSeconds">Duration (0 = until the end of the capture).</param>
     public static RenderedAudio Render(
         VgmFile vgm,
         AudioProfile profile,
@@ -185,7 +185,7 @@ public static class MsxSoundRenderer
             renderedFrames += framesThisChunk;
         }
 
-        // Pós-processamento no sinal inteiro (mantém o estado dos filtros contínuo).
+        // Post-processing on the whole signal (keeps the filter state continuous).
         if (profile.HighPassHz > 0)
         {
             var hpL = Biquad.CreateHighPass(sampleRate, profile.HighPassHz, 0.707);
@@ -214,7 +214,7 @@ public static class MsxSoundRenderer
             reverb.Process(outL, outR, totalFrames, Math.Min(1f, profile.ReverbMix));
         }
 
-        // Recorte do trecho pedido + normalização opcional.
+        // Slice the requested range and apply optional normalization.
         float peak = 0f;
         for (int i = startFrame; i < totalFrames; i++)
         {
@@ -248,18 +248,18 @@ public static class MsxSoundRenderer
     }
 
     /// <summary>
-    /// Estima em que instante o som de um VGM deixa de ser audível, olhando só os registradores
-    /// de volume/chave (sem renderizar). Usado para não renderizar os ~12 s de silêncio que a
-    /// gravação de um efeito curto carrega no fim.
+    /// Estimates when a VGM stops being audible, looking only at the volume/key registers (without
+    /// rendering). Used to avoid rendering the ~12 s of silence that a short effect capture carries
+    /// at the end.
     /// </summary>
-    /// <param name="vgm">VGM de origem.</param>
-    /// <param name="tailSeconds">Cauda extra depois do último instante audível.</param>
+    /// <param name="vgm">Source VGM.</param>
+    /// <param name="tailSeconds">Extra tail after the last audible instant.</param>
     public static double FindAudibleEnd(VgmFile vgm, double tailSeconds = 0.3)
     {
         ArgumentNullException.ThrowIfNull(vgm);
 
         var psgVolume = new int[3];
-        var psgMask = 0x3F; // tudo desligado até o jogo ligar
+        var psgMask = 0x3F; // everything off until the game enables it
         var sccVolume = new int[5];
         var sccKey = 0;
         long lastAudible = 0;
@@ -308,8 +308,8 @@ public static class MsxSoundRenderer
     }
 
     /// <summary>
-    /// Renderiza como o jogo toca: um loop exato quando a música tem loop, ou do começo até o
-    /// último evento (+ cauda) quando é jingle.
+    /// Renders the way the game plays it: an exact loop when the song has one, or from the start to
+    /// the last event (+ tail) for a jingle.
     /// </summary>
     public static RenderedAudio RenderForPlayback(VgmFile vgm, AudioProfile profile, int sampleRate = 48000)
     {
@@ -329,7 +329,7 @@ public static class MsxSoundRenderer
         for (int i = 0; i < channels; i++)
         {
             float p = i < pan.Length ? Math.Clamp(pan[i], -1f, 1f) : 0f;
-            double theta = (p + 1.0) * Math.PI / 4.0; // panning de potência constante
+            double theta = (p + 1.0) * Math.PI / 4.0; // constant-power panning
             result[i] = ((float)Math.Cos(theta), (float)Math.Sin(theta));
         }
 

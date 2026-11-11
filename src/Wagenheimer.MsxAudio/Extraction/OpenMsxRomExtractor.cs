@@ -10,27 +10,27 @@ using Wagenheimer.MsxAudio.Songs;
 namespace Wagenheimer.MsxAudio.Extraction;
 
 /// <summary>
-/// Extrai a música/efeitos de uma ROM de MSX dirigindo o <b>openMSX</b>: injeta
-/// <c>CALL &lt;rotina de som&gt;</c> com cada id, grava o <b>VGM</b> (escritas de registrador) e
-/// devolve uma biblioteca pronta para salvar em <c>.msxaudio</c>.
+/// Extracts a ROM's music/effects by driving <b>openMSX</b>: it injects
+/// <c>CALL &lt;sound routine&gt;</c> with each id, records the <b>VGM</b> (register writes) and
+/// returns a library ready to be saved as <c>.msxaudio</c>.
 /// </summary>
 /// <remarks>
-/// <para>A injeção é feita exatamente como um speedrun faria: empilha o PC atual, aponta o PC para
-/// a rotina "toca som A" e põe o id em <c>A</c>. Como o VGM guarda só escritas de registrador, o
-/// resultado é o som do chip, não uma gravação.</para>
+/// <para>The injection works exactly like a debugger would: push the current PC, point the PC at the
+/// "play sound A" routine and put the id in <c>A</c>. Because the VGM stores only register writes,
+/// the result is the chip's sound, not a recording.</para>
 ///
-/// <para><b>Por que openMSX e não emular a ROM aqui dentro:</b> o formato VGM é a fonte da verdade
-/// e o openMSX já emula VDP/CPU/mapper/SCC com fidelidade comprovada. O pacote cuida do que é
-/// portátil (chips + VGM + loop + reprodução); a extração usa o emulador como "gravador".</para>
+/// <para><b>Why openMSX and not emulating the ROM here:</b> the VGM is the source of truth and
+/// openMSX already emulates VDP/CPU/mapper/SCC with proven fidelity. The package handles what is
+/// portable (chips + VGM + loop + playback); extraction uses the emulator as a "recorder".</para>
 /// </remarks>
 public static class OpenMsxRomExtractor
 {
-    /// <summary>Executa a extração.</summary>
+    /// <summary>Runs the extraction.</summary>
     public static ExtractionResult Extract(RomExtractionOptions options, Action<string>? log = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         if (!File.Exists(options.RomPath))
-            throw new FileNotFoundException("ROM não encontrada", options.RomPath);
+            throw new FileNotFoundException("ROM not found", options.RomPath);
 
         RomExtractionProfile profile = options.Profile;
         string work = Path.GetFullPath(options.WorkDirectory);
@@ -62,16 +62,16 @@ public static class OpenMsxRomExtractor
         startInfo.ArgumentList.Add(script);
 
         log?.Invoke($"openMSX: {options.OpenMsxPath} ({profile.Machine}) — script {script}");
-        using (var process = Process.Start(startInfo) ?? throw new InvalidOperationException("não foi possível iniciar o openMSX"))
+        using (var process = Process.Start(startInfo) ?? throw new InvalidOperationException("could not start openMSX"))
         {
             if (!process.WaitForExit(TimeSpan.FromSeconds(options.TimeoutSeconds)))
             {
                 try { process.Kill(true); } catch { /* ignore */ }
-                throw new TimeoutException($"openMSX não terminou em {options.TimeoutSeconds:F0}s");
+                throw new TimeoutException($"openMSX did not finish in {options.TimeoutSeconds:F0}s");
             }
         }
 
-        // importa os VGMs gravados
+        // import the recorded VGMs
         var library = new MsxAudioLibrary(profile.Name);
         library.Manifest.Source = $"openMSX ({Path.GetFileName(options.RomPath)})";
         var files = new Dictionary<int, string>();
@@ -82,7 +82,7 @@ public static class OpenMsxRomExtractor
             string? file = Directory.GetFiles(vgmDirectory, $"id{id:00}*.vgm").OrderBy(f => f).FirstOrDefault();
             if (file == null)
             {
-                log?.Invoke($"id {id}: nenhum VGM gravado");
+                log?.Invoke($"id {id}: no VGM recorded");
                 continue;
             }
 

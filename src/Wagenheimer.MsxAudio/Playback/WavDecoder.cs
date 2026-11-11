@@ -4,7 +4,7 @@ using System.Text;
 
 namespace Wagenheimer.MsxAudio.Playback;
 
-/// <summary>WAV PCM decodificado (8/16/24/32 bits inteiros ou float).</summary>
+/// <summary>Decoded PCM WAV (8/16/24/32-bit integer or float).</summary>
 public sealed class DecodedWav
 {
     internal DecodedWav(int sampleRate, int channels, float[] samples)
@@ -14,16 +14,16 @@ public sealed class DecodedWav
         Samples = samples;
     }
 
-    /// <summary>Taxa de amostragem.</summary>
+    /// <summary>Sample rate.</summary>
     public int SampleRate { get; }
 
-    /// <summary>Canais.</summary>
+    /// <summary>Channels.</summary>
     public int Channels { get; }
 
-    /// <summary>Amostras intercaladas (-1..1).</summary>
+    /// <summary>Interleaved samples (-1..1).</summary>
     public float[] Samples { get; }
 
-    /// <summary>Converte para mono (média dos canais).</summary>
+    /// <summary>Converts to mono (average of the channels).</summary>
     public float[] ToMono()
     {
         if (Channels == 1) return Samples;
@@ -41,15 +41,15 @@ public sealed class DecodedWav
     }
 }
 
-/// <summary>Leitor mínimo de WAV (RIFF) usado pelos samples dos pacotes.</summary>
+/// <summary>Minimal WAV (RIFF) reader used by package samples.</summary>
 public static class WavDecoder
 {
-    /// <summary>Decodifica um WAV em memória.</summary>
+    /// <summary>Decodes an in-memory WAV.</summary>
     public static DecodedWav Decode(byte[] data)
     {
         ArgumentNullException.ThrowIfNull(data);
         if (data.Length < 44 || data[0] != 'R' || data[1] != 'I' || data[2] != 'F' || data[3] != 'F')
-            throw new InvalidDataException("WAV inválido (sem cabeçalho RIFF).");
+            throw new InvalidDataException("invalid WAV (no RIFF header).");
 
         int format = 1;
         int channels = 1;
@@ -90,7 +90,7 @@ public static class WavDecoder
             position += 8 + size + (size & 1);
         }
 
-        throw new InvalidDataException("WAV sem bloco 'data'.");
+        throw new InvalidDataException("WAV without a 'data' chunk.");
     }
 
     private static float ReadSample(byte[] data, int offset, int bytesPerSample, int format)

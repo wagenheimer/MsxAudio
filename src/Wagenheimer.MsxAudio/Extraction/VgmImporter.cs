@@ -7,17 +7,17 @@ using Wagenheimer.MsxAudio.Vgm;
 
 namespace Wagenheimer.MsxAudio.Extraction;
 
-/// <summary>Importa uma pasta de VGMs para uma biblioteca <c>.msxaudio</c>.</summary>
+/// <summary>Imports a folder of VGMs into a <c>.msxaudio</c> library.</summary>
 public static class VgmImporter
 {
     /// <summary>
-    /// Importa todos os <c>*.vgm</c> de uma pasta.
+    /// Imports every <c>*.vgm</c> from a folder.
     /// </summary>
-    /// <param name="directory">Pasta com os VGMs.</param>
-    /// <param name="title">Título da biblioteca.</param>
-    /// <param name="music">Se true, são músicas (detecta loop); se false, são efeitos.</param>
-    /// <param name="names">Nomes amigáveis por nome de arquivo (sem extensão).</param>
-    /// <param name="log">Diagnóstico opcional.</param>
+    /// <param name="directory">Folder with the VGMs.</param>
+    /// <param name="title">Library title.</param>
+    /// <param name="music">When true they are songs (loop detection); otherwise effects.</param>
+    /// <param name="names">Friendly names by file name (without extension).</param>
+    /// <param name="log">Optional diagnostics.</param>
     public static MsxAudioLibrary Import(
         string directory,
         string title,
@@ -34,7 +34,7 @@ public static class VgmImporter
         return library;
     }
 
-    /// <summary>Importa um único VGM.</summary>
+    /// <summary>Imports a single VGM.</summary>
     public static MsxAudioSong ImportFile(
         MsxAudioLibrary library,
         string file,
@@ -55,7 +55,7 @@ public static class VgmImporter
             }
 
             log?.Invoke($"{id,-16} {vgm.TotalSeconds,7:F2}s  " +
-                        (vgm.HasLoop ? $"loop {vgm.LoopStartSeconds:F3}s + {vgm.LoopSeconds:F3}s" : "sem loop"));
+                        (vgm.HasLoop ? $"loop {vgm.LoopStartSeconds:F3}s + {vgm.LoopSeconds:F3}s" : "no loop"));
             return library.AddSong(id, name, vgm, vgm.HasLoop, vgm.LoopStartSeconds, vgm.LoopSeconds);
         }
 

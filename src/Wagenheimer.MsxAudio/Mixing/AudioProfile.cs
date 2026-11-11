@@ -3,54 +3,53 @@ using System;
 namespace Wagenheimer.MsxAudio.Mixing;
 
 /// <summary>
-/// Perfil de mixagem do áudio do MSX. O perfil define <b>como</b> PSG e SCC são combinados —
-/// a fonte (VGM) é sempre a mesma, então isto escolhe entre "exatamente o original" e versões
-/// melhoradas (estéreo, filtros, reverb).
+/// MSX audio mixing profile. The profile defines <b>how</b> PSG and SCC are combined — the source
+/// (VGM) is always the same, so this chooses between "exactly the original" and improved versions
+/// (stereo, filters, reverb).
 /// </summary>
 public sealed class AudioProfile
 {
-    /// <summary>Nome do perfil (usado nas opções e na linha de comando).</summary>
+    /// <summary>Profile name (used in options and on the command line).</summary>
     public string Name { get; init; } = "original";
 
-    /// <summary>Fator de sobreamostragem da renderização interna (1, 2, 4 ou 8).</summary>
+    /// <summary>Internal render oversampling factor (1, 2, 4 or 8).</summary>
     public int Oversample { get; init; } = 4;
 
-    /// <summary>Ganho aplicado ao PSG (relativo ao SCC — preserva o balanço do chip).</summary>
+    /// <summary>Gain applied to the PSG (relative to the SCC — preserves the chip balance).</summary>
     public float PsgGain { get; init; } = 1f;
 
-    /// <summary>Ganho aplicado ao SCC.</summary>
+    /// <summary>Gain applied to the SCC.</summary>
     public float SccGain { get; init; } = 1f;
 
-    /// <summary>Panorama dos 3 canais do PSG (-1 = esquerda, 0 = centro, +1 = direita).</summary>
+    /// <summary>Panning of the three PSG channels (-1 = left, 0 = centre, +1 = right).</summary>
     public float[] PsgPan { get; init; } = new float[3];
 
-    /// <summary>Panorama dos 5 canais do SCC.</summary>
+    /// <summary>Panning of the five SCC channels.</summary>
     public float[] SccPan { get; init; } = new float[5];
 
-    /// <summary>Corte do passa-alta em Hz (0 = desligado). Remove o offset DC do chip.</summary>
+    /// <summary>High-pass cutoff in Hz (0 = off). Removes the chip's DC offset.</summary>
     public float HighPassHz { get; init; } = 12f;
 
-    /// <summary>Corte do passa-baixa em Hz (0 = desligado). Aproxima o filtro da saída do MSX.</summary>
+    /// <summary>Low-pass cutoff in Hz (0 = off). Approximates the MSX output filter.</summary>
     public float LowPassHz { get; init; }
 
-    /// <summary>Mistura de reverb (0 = seco, 1 = só reverb).</summary>
+    /// <summary>Reverb mix (0 = dry, 1 = wet only).</summary>
     public float ReverbMix { get; init; }
 
-    /// <summary>Normaliza o pico para este valor (0 = mantém o nível do chip, autêntico).</summary>
+    /// <summary>Normalizes the peak to this value (0 = keep the chip level, authentic).</summary>
     public float NormalizePeak { get; init; }
 
-    /// <summary>Ganho mestre aplicado à soma dos chips (antes de virar PCM).</summary>
+    /// <summary>Master gain applied to the chip sum (before becoming PCM).</summary>
     public float MasterGain { get; init; } = DefaultMasterGain;
 
-    /// <summary>Ganho que leva a soma máxima teórica dos chips para ~1.0.</summary>
+    /// <summary>Gain that brings the theoretical maximum chip sum to ~1.0.</summary>
     /// <remarks>
-    /// Calibrado contra a captura do openMSX: o nível do render ficava 3,4 dB abaixo da
-    /// gravação de referência (mesma forma espectral, só ganho). 1/27000 = 1,48x o valor
-    /// anterior, que era 1/40000.
+    /// Calibrated against the openMSX capture: the render used to sit 3.4 dB below the reference
+    /// recording (same spectral shape, just gain). 1/27000 = 1.48x the previous 1/40000.
     /// </remarks>
     public const float DefaultMasterGain = 1f / 27000f;
 
-    /// <summary>Fiel ao hardware: mono, sem filtros além do corte de DC.</summary>
+    /// <summary>Faithful to the hardware: mono, no filters beyond the DC cut.</summary>
     public static AudioProfile Original => new()
     {
         Name = "original",
@@ -58,7 +57,7 @@ public sealed class AudioProfile
         HighPassHz = 12f,
     };
 
-    /// <summary>Fiel ao chip, mas com os canais espalhados em estéreo (ouve-se "maior").</summary>
+    /// <summary>Faithful to the chip, but with the channels spread in stereo.</summary>
     public static AudioProfile Stereo => new()
     {
         Name = "stereo",
@@ -69,7 +68,7 @@ public sealed class AudioProfile
         LowPassHz = 16000f,
     };
 
-    /// <summary>Master: estéreo mais aberto, sobreamostragem maior, filtros suaves e um reverb curto.</summary>
+    /// <summary>Master: wider stereo, higher oversampling, gentle filters and a short reverb.</summary>
     public static AudioProfile Remaster => new()
     {
         Name = "remaster",
@@ -82,10 +81,10 @@ public sealed class AudioProfile
         NormalizePeak = 0.89f,
     };
 
-    /// <summary>Perfis prontos.</summary>
+    /// <summary>Ready-made profiles.</summary>
     public static AudioProfile[] All => new[] { Original, Stereo, Remaster };
 
-    /// <summary>Cópia do perfil com outra sobreamostragem (efeitos curtos podem usar menos).</summary>
+    /// <summary>Copy of the profile with another oversampling factor (short effects can use less).</summary>
     public AudioProfile WithOversample(int oversample) => new()
     {
         Name = Name,
@@ -101,7 +100,7 @@ public sealed class AudioProfile
         MasterGain = MasterGain,
     };
 
-    /// <summary>Busca um perfil pelo nome (padrão: original).</summary>
+    /// <summary>Finds a profile by name (default: original).</summary>
     public static AudioProfile ByName(string? name) => name?.Trim().ToLowerInvariant() switch
     {
         "stereo" or "estéreo" => Stereo,

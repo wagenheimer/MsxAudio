@@ -10,16 +10,16 @@ using Xunit;
 namespace Wagenheimer.MsxAudio.Tests;
 
 /// <summary>
-/// Testes do emulador de Ã¡udio do MSX (PSG AY-3-8910 + SCC) e do leitor/renderizador de VGM.
+/// Tests for the MSX audio emulator (PSG AY-3-8910 + SCC) and the VGM reader/renderer.
 /// </summary>
 public class MsxAudioChipTests
 {
     private const double MsxClock = 1789772.5;
 
-    /// <summary>Conta cruzamentos por zero para estimar a frequÃªncia de uma onda quadrada.</summary>
+/// <summary>Counts zero crossings to estimate the frequency of a square wave.</summary>
     private static double EstimateFrequency(float[] samples, double sampleRate)
     {
-        // os canais do chip sÃ£o unipolares (0..8160): tira o nÃ­vel mÃ©dio antes de contar
+        // chip channels are unipolar (0..8160): remove the mean level before counting
         double mean = 0;
         foreach (float sample in samples) mean += sample;
         mean /= samples.Length;
@@ -41,10 +41,10 @@ public class MsxAudioChipTests
         var psg = new Ay8910(MsxClock, rate);
 
         const int period = 200; // f = clock / (16 * period) = 559,3 Hz
-        psg.Write(7, 0x3E);     // sÃ³ o canal 1 com tom, sem ruÃ­do
+        psg.Write(7, 0x3E);     // channel 1 tone only, no noise
         psg.Write(0, period & 0xFF);
         psg.Write(1, period >> 8);
-        psg.Write(8, 15);       // volume mÃ¡ximo
+        psg.Write(8, 15);       // maximum volume
 
         int count = (int)rate;
         var ch0 = new float[count];
@@ -64,7 +64,7 @@ public class MsxAudioChipTests
     {
         const double rate = 192000;
         var psg = new Ay8910(MsxClock, rate);
-        psg.Write(7, 0x3F); // tom e ruÃ­do desligados em todos os canais
+        psg.Write(7, 0x3F); // tone and noise off on every channel
         psg.Write(0, 200);
         psg.Write(8, 15);
 
@@ -73,8 +73,8 @@ public class MsxAudioChipTests
         var ch2 = new float[4096];
         psg.Render(ch0, ch1, ch2, 4096);
 
-        // com tom e ruÃ­do desligados o chip entrega nÃ­vel CONTÃNUO (o offset DC que o
-        // renderizador remove com o passa-alta), nÃ£o uma oscilaÃ§Ã£o
+        // with tone and noise off the chip outputs a CONTINUOUS level (the DC offset the
+        // renderer removes with the high-pass), not an oscillation
         Assert.All(ch0, v => Assert.Equal(ch0[0], v));
     }
 
@@ -84,7 +84,7 @@ public class MsxAudioChipTests
         const double rate = 192000;
         var scc = new KonamiScc(MsxClock, rate);
 
-        // onda senoidal de 32 pontos no canal 2 (Ã­ndice 1)
+        // 32-point sine wave on channel 2 (index 1)
         for (int i = 0; i < 32; i++)
         {
             scc.Write(0, 0x20 + i, (int)Math.Round(127 * Math.Sin(2 * Math.PI * i / 32)));
@@ -129,7 +129,7 @@ public class MsxAudioChipTests
     [Fact]
     public void VgmLoopFinder_FindsRepeatedSection()
     {
-        // 140 s: o padrÃ£o de notas se repete a cada 40 s desde o comeÃ§o
+        // 140 s: the note pattern repeats every 40 s from the start
         var commands = new List<byte[]>();
         for (int second = 0; second < 140; second++)
         {

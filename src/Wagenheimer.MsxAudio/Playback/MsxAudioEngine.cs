@@ -9,17 +9,17 @@ using Wagenheimer.MsxAudio.Vgm;
 namespace Wagenheimer.MsxAudio.Playback;
 
 /// <summary>
-/// Motor de áudio do MSX: toca as músicas <b>direto do VGM</b> (emulando PSG/SCC em tempo real)
-/// e mistura efeitos como samples PCM, tudo num único stream estéreo.
+/// MSX audio engine: plays songs <b>straight from the VGM</b> (emulating PSG/SCC in real time) and
+/// mixes effects as PCM samples, all into a single stereo stream.
 /// </summary>
 /// <remarks>
-/// <para><b>Streaming, não arquivo:</b> a música não é pré-renderizada. O VGM é consumido
-/// enquanto se toca, então o loop é <b>contínuo de verdade</b> (o chip nunca é reiniciado, como no
-/// hardware) e cada faixa ocupa só os KB do VGM. O áudio já sai como PCM 16 bits/float pronto
-/// para a placa — veja <c>Wagenheimer.MsxAudio.MonoGame</c> para a ponte com o MonoGame.</para>
+/// <para><b>Streaming, not a file:</b> the music is not pre-rendered. The VGM is consumed while it
+/// plays, so the loop is <b>genuinely continuous</b> (the chip is never restarted, as on hardware)
+/// and each track takes only the KBs of its VGM. The output is 16-bit PCM ready for the sound card
+/// — see <c>Wagenheimer.MsxAudio.MonoGame</c> for the MonoGame bridge.</para>
 ///
-/// <para><b>Player de sample:</b> <see cref="PlaySample"/> toca um efeito (um VGM curto
-/// pré-renderizado ou um WAV do pacote) com volume/pan e polifonia limitada.</para>
+/// <para><b>Sample player:</b> <see cref="PlaySample"/> plays an effect (a short pre-rendered VGM or
+/// a WAV from the package) with volume/pan and limited polyphony.</para>
 /// </remarks>
 public sealed class MsxAudioEngine : IDisposable
 {
@@ -27,12 +27,11 @@ public sealed class MsxAudioEngine : IDisposable
     private readonly Dictionary<string, float[]> _sampleCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<SampleVoice> _voices = new();
     private ChipSongStream? _song;
-    private float[] _mixBuffer = Array.Empty<float>();
 
-    /// <summary>Cria o motor para uma biblioteca.</summary>
-    /// <param name="library">Pacote <c>.msxaudio</c> carregado.</param>
-    /// <param name="profile">Perfil de mixagem (padrão: original).</param>
-    /// <param name="sampleRate">Taxa de saída em Hz.</param>
+    /// <summary>Creates the engine for a library.</summary>
+    /// <param name="library">Loaded <c>.msxaudio</c> package.</param>
+    /// <param name="profile">Mixing profile (default: original).</param>
+    /// <param name="sampleRate">Output rate in Hz.</param>
     public MsxAudioEngine(MsxAudioLibrary library, AudioProfile? profile = null, int sampleRate = 48000)
     {
         _library = library ?? throw new ArgumentNullException(nameof(library));
@@ -40,36 +39,36 @@ public sealed class MsxAudioEngine : IDisposable
         SampleRate = sampleRate;
     }
 
-    /// <summary>Perfil de mixagem (muda o próximo PlaySong).</summary>
+    /// <summary>Mixing profile (affects the next <see cref="PlaySong"/>).</summary>
     public AudioProfile Profile { get; set; }
 
-    /// <summary>Taxa de saída (Hz).</summary>
+    /// <summary>Output rate (Hz).</summary>
     public int SampleRate { get; }
 
-    /// <summary>Volume da música (0..1).</summary>
+    /// <summary>Music volume (0..1).</summary>
     public float MusicVolume { get; set; } = 1f;
 
-    /// <summary>Volume dos efeitos (0..1).</summary>
+    /// <summary>Effect volume (0..1).</summary>
     public float SampleVolume { get; set; } = 1f;
 
-    /// <summary>Volume geral (0..1).</summary>
+    /// <summary>Master volume (0..1).</summary>
     public float MasterVolume { get; set; } = 1f;
 
-    /// <summary>Quantos efeitos podem tocar ao mesmo tempo (rouba o mais antigo).</summary>
+    /// <summary>How many effects can play at once (steals the oldest).</summary>
     public int MaxSampleVoices { get; set; } = 8;
 
-    /// <summary>Id da música tocando (ou <c>null</c>).</summary>
+    /// <summary>Id of the playing song (or <c>null</c>).</summary>
     public string? CurrentSongId => _song?.Id;
 
-    /// <summary>Há música tocando?</summary>
+    /// <summary>Is a song playing?</summary>
     public bool IsPlaying => _song is { Finished: false };
 
-    /// <summary>Toca uma música da biblioteca.</summary>
-    /// <param name="id">Id da música.</param>
-    /// <param name="loop">Respeita o loop do manifesto (true) ou toca uma vez?</param>
+    /// <summary>Plays a song from the library.</summary>
+    /// <param name="id">Song id.</param>
+    /// <param name="loop">Honours the manifest loop (true) or plays once?</param>
     public void PlaySong(string id, bool loop = true)
     {
-        var song = _library.Find(id) ?? throw new ArgumentException($"música '{id}' não existe na biblioteca", nameof(id));
+        var song = _library.Find(id) ?? throw new ArgumentException($"song '{id}' does not exist in the library", nameof(id));
         var vgm = _library.LoadVgm(song);
 
         double start = song.Loop ? song.LoopStart : 0;
@@ -79,13 +78,13 @@ public sealed class MsxAudioEngine : IDisposable
         _song = new ChipSongStream(vgm, Profile, SampleRate, loop && song.Loop);
     }
 
-    /// <summary>Para a música.</summary>
+    /// <summary>Stops the music.</summary>
     public void StopSong() => _song = null;
 
-    /// <summary>Toca um efeito pelo id (VGM curto ou WAV do pacote).</summary>
+    /// <summary>Plays an effect by id (short VGM or WAV from the package).</summary>
     /// <remarks>
-    /// Como no chip de verdade, cada efeito tem <b>uma voz</b>: re-tocar o mesmo id reinicia o som
-    /// em vez de empilhar (é o que faz uma queda longa soar igual ao original).
+    /// As on the real chip, each effect has <b>one voice</b>: retriggering the same id restarts the
+    /// sound instead of stacking (which is what makes a long fall sound like the original).
     /// </remarks>
     public void PlaySample(string id, float volume = 1f, float pan = 0f)
     {
@@ -104,7 +103,7 @@ public sealed class MsxAudioEngine : IDisposable
         _voices.Add(new SampleVoice(id, data, volume, left, right));
     }
 
-    /// <summary>Para um efeito específico (se estiver tocando).</summary>
+    /// <summary>Stops a specific effect (when playing).</summary>
     public void StopSample(string id)
     {
         for (int i = _voices.Count - 1; i >= 0; i--)
@@ -114,19 +113,19 @@ public sealed class MsxAudioEngine : IDisposable
         }
     }
 
-    /// <summary>Para todos os efeitos.</summary>
+    /// <summary>Stops all effects.</summary>
     public void StopAllSamples() => _voices.Clear();
 
     /// <summary>
-    /// Renderiza o próximo bloco de áudio <b>estéreo intercalado</b> em <paramref name="destination"/>.
+    /// Renders the next block of <b>interleaved stereo</b> audio into <paramref name="destination"/>.
     /// </summary>
-    /// <param name="destination">Buffer com <c>frames × 2</c> amostras (float -1..1).</param>
-    /// <param name="frames">Quadros a renderizar.</param>
+    /// <param name="destination">Buffer with <c>frames × 2</c> samples (float -1..1).</param>
+    /// <param name="frames">Frames to render.</param>
     public void Render(float[] destination, int frames)
     {
         ArgumentNullException.ThrowIfNull(destination);
         if (destination.Length < frames * 2)
-            throw new ArgumentException("buffer menor que frames × 2", nameof(destination));
+            throw new ArgumentException("buffer smaller than frames × 2", nameof(destination));
 
         Array.Clear(destination, 0, frames * 2);
         if (frames == 0) return;
@@ -142,14 +141,14 @@ public sealed class MsxAudioEngine : IDisposable
         RenderSamples(destination, frames, master);
     }
 
-    /// <summary>Prepara (renderiza) os samples de todos os efeitos, para não travar no primeiro uso.</summary>
+    /// <summary>Renders (prepares) the samples of every effect, to avoid a hitch on first use.</summary>
     public void PreloadSamples()
     {
         foreach (var clip in _library.Clips)
             _ = GetSample(clip);
     }
 
-    /// <summary>Descarta tudo (streams, samples em cache e vozes).</summary>
+    /// <summary>Discards everything (streams, cached samples and voices).</summary>
     public void Dispose()
     {
         _song = null;
@@ -181,7 +180,7 @@ public sealed class MsxAudioEngine : IDisposable
             if (voice.Position >= data.Length) _voices.RemoveAt(v);
         }
 
-        // limita a soma final (evita estouro quando música + efeitos coincidem)
+        // limit the final sum (avoids clipping when music and effects coincide)
         for (int i = 0; i < frames * 2; i++)
         {
             float value = destination[i];
@@ -194,7 +193,7 @@ public sealed class MsxAudioEngine : IDisposable
     {
         if (_sampleCache.TryGetValue(clip.Id, out var cached)) return cached;
 
-        // 1) WAV dentro do pacote (sample "de verdade")
+        // 1) WAV inside the package (a "real" sample)
         if (clip.Entry.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
         {
             byte[]? bytes = _library.ReadEntry(clip.Entry);
@@ -205,7 +204,7 @@ public sealed class MsxAudioEngine : IDisposable
             return mono;
         }
 
-        // 2) VGM (efeito do chip): renderiza e converte para mono
+        // 2) VGM (chip effect): render and convert to mono
         var vgm = _library.LoadVgm(clip);
         double end = MsxSoundRenderer.FindAudibleEnd(vgm);
         var sampleProfile = Profile.WithOversample(Math.Min(Profile.Oversample, 2));
@@ -243,7 +242,7 @@ public sealed class MsxAudioEngine : IDisposable
         public float PanRight { get; }
     }
 
-    /// <summary>Streaming de uma música: consome o VGM e emula os chips amostra a amostra.</summary>
+    /// <summary>Streaming of one song: consumes the VGM and emulates the chips sample by sample.</summary>
     private sealed class ChipSongStream
     {
         private const int ChunkFrames = 2048;
@@ -297,7 +296,7 @@ public sealed class MsxAudioEngine : IDisposable
             _sccPan = BuildPan(profile.SccPan, 5);
             _decimator = new FirDecimator(_oversample);
 
-            // mesmos filtros do render offline (senão o streaming soaria diferente)
+            // same filters as the offline renderer (otherwise streaming would sound different)
             if (profile.HighPassHz > 0)
             {
                 _highPassL = Biquad.CreateHighPass(sampleRate, profile.HighPassHz, 0.707);
@@ -326,7 +325,7 @@ public sealed class MsxAudioEngine : IDisposable
             _position = _loop ? _loopStart : 0;
             _endOfSong = MsxSoundRenderer.FindAudibleEnd(vgm, 1.5) * 44100.0;
 
-            // aquece o estado dos chips até o início do loop (registradores, sem gerar áudio)
+            // warm the chip state up to the loop start (registers only, no audio)
             _index = 0;
             while (_index < _startIndex)
             {

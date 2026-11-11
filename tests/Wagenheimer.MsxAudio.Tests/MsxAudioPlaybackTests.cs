@@ -10,7 +10,7 @@ using Xunit;
 
 namespace Wagenheimer.MsxAudio.Tests;
 
-/// <summary>Testes do pacote <c>.msxaudio</c> e do motor de reprodução.</summary>
+/// <summary>Tests for the <c>.msxaudio</c> package and the playback engine.</summary>
 public class MsxAudioPlaybackTests
 {
     private const double Clock = 1789772.5;
@@ -66,7 +66,7 @@ public class MsxAudioPlaybackTests
                 collected.Add((buffer[f * 2] + buffer[f * 2 + 1]) / 2f);
         }
 
-        Assert.True(collected.Any(v => Math.Abs(v) > 0.005f));
+        Assert.Contains(collected, v => Math.Abs(v) > 0.005f);
         Assert.Equal("tone", engine.CurrentSongId);
 
         // nenhum salto grande perto das emendas (1 loop ≈ 2 s)
@@ -173,8 +173,8 @@ public class MsxAudioPlaybackTests
     }
 
     /// <summary>
-    /// Constrói um VGM sintético: uma nota do PSG tocando continuamente; o "loop" é só a marcação
-    /// (o stream de eventos é contínuo, como o de uma música de verdade).
+    /// Builds a synthetic VGM: a PSG note playing continuously; the "loop" is only the marker
+    /// (the event stream is continuous, like a real song's).
     /// </summary>
     private static VgmFile BuildTone(double totalSeconds, double loopStart = 0, double loopSeconds = 0)
     {

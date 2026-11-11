@@ -3,24 +3,23 @@
 namespace Wagenheimer.MsxAudio.Chips;
 
 /// <summary>
-/// Emulador do PSG AY-3-8910 (o chip de som do MSX, 3 canais + ruÃ­do + envelope).
+/// AY-3-8910 PSG emulator (the MSX sound chip: 3 channels + noise + envelope).
 /// </summary>
 /// <remarks>
-/// Porte fiel do nÃºcleo <c>emu2149</c> (Mitsutaka Okazaki, usado pelo VGMPlay), com o caminho
-/// de qualidade desligado: cada amostra avanÃ§a o chip por uma fraÃ§Ã£o de ciclo. Isso mantÃ©m
-/// exatamente o mesmo comportamento (tom, ruÃ­do, envelope e tabela de volume do AY) que o
-/// player de VGM de referÃªncia â€” Ã© o que garante que a mÃºsica renderizada aqui soe como o
-/// original e nÃ£o como "uma aproximaÃ§Ã£o".
+/// Faithful port of the <c>emu2149</c> core (Mitsutaka Okazaki, used by VGMPlay) with the quality
+/// path off: every sample advances the chip by a fraction of a cycle. This keeps the exact same
+/// behaviour (tone, noise, envelope and the AY volume table) as the reference VGM player, which is
+/// what makes the rendered music sound like the original instead of "an approximation".
 ///
-/// A saÃ­da Ã© por canal (0..2), em unidades inteiras do chip (0..8160), sem mixagem: quem
-/// mixa Ã© o <see cref="Wagenheimer.MsxAudio.Mixing.MsxSoundRenderer"/>, que aplica ganho/pan por canal.
+/// Output is per channel (0..2) in raw chip units (0..8160), without mixing: the
+/// <see cref="Mixing.MsxSoundRenderer"/> applies gain and panning per channel.
 /// </remarks>
 public sealed class Ay8910
 {
-    /// <summary>Tabela de volume do AY-3-8910 (Ã­ndice 0..31, dois degraus por nÃ­vel).</summary>
+    /// <summary>AY-3-8910 volume table (index 0..31, two steps per level).</summary>
     private static readonly int[] VolumeAy = BuildVolumeAy();
 
-    /// <summary>MÃ¡scaras dos registradores (bits nÃ£o usados sÃ£o descartados, como no chip).</summary>
+    /// <summary>Register masks (unused bits are discarded, as on the chip).</summary>
     private static readonly byte[] RegisterMask =
     {
         0xff, 0x0f, 0xff, 0x0f, 0xff, 0x0f, 0x1f, 0x3f,
@@ -54,9 +53,9 @@ public sealed class Ay8910
     private bool _envAlternate;
     private bool _envHold;
 
-    /// <summary>Cria o PSG para uma taxa de amostragem interna (normalmente 4x a taxa de saÃ­da).</summary>
-    /// <param name="clock">Clock do chip em Hz (no MSX: 1789772,5).</param>
-    /// <param name="sampleRate">Taxa de amostragem interna em Hz.</param>
+    /// <summary>Creates the PSG for an internal sample rate (usually 4x the output rate).</summary>
+    /// <param name="clock">Chip clock in Hz (MSX: 1789772.5).</param>
+    /// <param name="sampleRate">Internal sample rate in Hz.</param>
     public Ay8910(double clock = 1789772.5, double sampleRate = 192000)
     {
         if (clock <= 0) throw new ArgumentOutOfRangeException(nameof(clock));
@@ -64,13 +63,13 @@ public sealed class Ay8910
         Reset();
     }
 
-    /// <summary>Clock configurado (Hz).</summary>
+    /// <summary>Configured clock (Hz).</summary>
     public double Clock { get; private set; }
 
-    /// <summary>Taxa interna configurada (Hz).</summary>
+    /// <summary>Configured internal sample rate (Hz).</summary>
     public double SampleRate { get; private set; }
 
-    /// <summary>Recalcula os incrementos do chip (ao mudar clock ou taxa de amostragem).</summary>
+    /// <summary>Recomputes the chip increments (when clock or sample rate changes).</summary>
     public void SetClock(double clock, double sampleRate)
     {
         if (clock <= 0) throw new ArgumentOutOfRangeException(nameof(clock));
@@ -78,11 +77,11 @@ public sealed class Ay8910
 
         Clock = clock;
         SampleRate = sampleRate;
-        // emu2149: base_incr = clk * 2^24 / (8 * rate) â€” a unidade interna Ã© clock/8.
+        // emu2149: base_incr = clk * 2^24 / (8 * rate) - the internal unit is clock/8.
         _baseIncr = (uint)(clock * (1 << GetaBits) / (8.0 * sampleRate));
     }
 
-    /// <summary>Volta ao estado de ligar (registradores em zero, sem som).</summary>
+    /// <summary>Returns to the power-on state (registers zeroed, no sound).</summary>
     public void Reset()
     {
         _baseCount = 0;
@@ -112,7 +111,7 @@ public sealed class Ay8910
         _envHold = false;
     }
 
-    /// <summary>Escreve um registrador do PSG (0..15).</summary>
+    /// <summary>Writes a PSG register (0..15).</summary>
     public void Write(int register, int value)
     {
         if (register is < 0 or > 15) return;
@@ -167,12 +166,12 @@ public sealed class Ay8910
         }
     }
 
-    /// <summary>SaÃ­da bruta (0..8160) do canal <paramref name="channel"/> na Ãºltima amostra.</summary>
+    /// <summary>Raw output (0..8160) of <paramref name="channel"/> on the last sample.</summary>
     public int GetOutput(int channel) => _output[channel];
 
     /// <summary>
-    /// AvanÃ§a uma amostra e escreve a saÃ­da dos 3 canais nos destinos (pode passar <c>null</c>
-    /// para ignorar um canal).
+    /// Advances one sample and writes the three channel outputs to the destinations (pass
+    /// <c>null</c> to skip a channel).
     /// </summary>
     public void RenderSample(float[]? ch0, float[]? ch1, float[]? ch2, int index)
     {
@@ -182,15 +181,15 @@ public sealed class Ay8910
         ch2?[index] = _output[2];
     }
 
-    /// <summary>Renderiza um bloco de amostras nos 3 buffers de canal (mesmo tamanho).</summary>
+    /// <summary>Renders a block of samples into the three channel buffers (same size).</summary>
     public void Render(float[] ch0, float[] ch1, float[] ch2, int count) =>
         Render(ch0, ch1, ch2, 0, count);
 
-    /// <summary>Renderiza <paramref name="count"/> amostras nos buffers, a partir de <paramref name="offset"/>.</summary>
+    /// <summary>Renders <paramref name="count"/> samples from <paramref name="offset"/>.</summary>
     public void Render(float[] ch0, float[] ch1, float[] ch2, int offset, int count)
     {
         if (ch0.Length < offset + count || ch1.Length < offset + count || ch2.Length < offset + count)
-            throw new ArgumentException("buffers de canal menores que a contagem pedida", nameof(count));
+            throw new ArgumentException("channel buffers smaller than the requested count", nameof(count));
 
         for (int i = offset; i < offset + count; i++)
         {
@@ -201,7 +200,7 @@ public sealed class Ay8910
         }
     }
 
-    /// <summary>Um passo do nÃºcleo (mesma ordem de operaÃ§Ãµes do emu2149).</summary>
+    /// <summary>One core step (same operation order as emu2149).</summary>
     private void UpdateOutput()
     {
         _baseCount += _baseIncr;
@@ -235,7 +234,7 @@ public sealed class Ay8910
             _envCount -= _envFreq != 0 ? _envFreq : 1;
         }
 
-        // RuÃ­do (LFSR de 17 bits)
+        // Noise (17-bit LFSR)
         _noiseCount += incr;
         if ((_noiseCount & 0x40) != 0)
         {
@@ -246,7 +245,7 @@ public sealed class Ay8910
 
         int noise = _noiseSeed & 1;
 
-        // Tom
+        // Tone
         for (int i = 0; i < 3; i++)
         {
             _count[i] += (uint)incr;
@@ -264,7 +263,7 @@ public sealed class Ay8910
             }
 
             int value = 0;
-            // mÃ¡scaras como no chip: 1 = canal desligado (bit ligado desabilita)
+            // masks follow the chip: 1 = channel off (a set bit disables it)
             if ((_toneDisabled[i] || _edge[i]) && (_noiseDisabled[i] || noise != 0))
             {
                 int volume = (_volume[i] & 32) != 0 ? VolumeAy[_envPtr] : VolumeAy[_volume[i] & 31];
@@ -277,7 +276,7 @@ public sealed class Ay8910
 
     private static int[] BuildVolumeAy()
     {
-        // Tabela EMU2149_VOL_AY_3_8910 (32 degraus, medida no chip).
+        // EMU2149_VOL_AY_3_8910 table (32 steps, measured on the chip).
         return new[]
         {
             0x00, 0x00, 0x03, 0x03, 0x04, 0x04, 0x06, 0x06,
@@ -287,4 +286,3 @@ public sealed class Ay8910
         };
     }
 }
-

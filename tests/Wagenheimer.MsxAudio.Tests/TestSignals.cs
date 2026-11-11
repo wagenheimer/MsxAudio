@@ -7,7 +7,7 @@ using Wagenheimer.MsxAudio.Vgm;
 
 namespace Wagenheimer.MsxAudio.Tests;
 
-/// <summary>Utilidades compartilhadas pelos testes (VGM sintético, WAV).</summary>
+/// <summary>Helpers shared by the tests (synthetic VGM, WAV).</summary>
 internal static class TestSignals
 {
     public const double Clock = 1789772.5;
@@ -25,7 +25,7 @@ internal static class TestSignals
         int remaining = (int)(totalSeconds * 44100);
         while (remaining > 0)
         {
-            // reescreve a frequência a cada 0,5 s (como um driver de verdade faz a cada quadro)
+            // rewrites the frequency every 0.5 s (like a real driver does every frame)
             int step = Math.Min(remaining, Math.Min(22050, 65535));
             commands.Add(new[] { (byte)0xA0, (byte)0, (byte)(200 + (step % 3)) });
             commands.Add(new[] { (byte)0x61, (byte)(step & 0xFF), (byte)((step >> 8) & 0xFF) });

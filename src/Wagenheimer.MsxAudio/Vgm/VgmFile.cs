@@ -4,20 +4,20 @@ using System.IO;
 
 namespace Wagenheimer.MsxAudio.Vgm;
 
-/// <summary>Tipo de escrita de chip guardada num evento de VGM.</summary>
+/// <summary>Kind of chip write stored in a VGM event.</summary>
 public enum VgmEventKind : byte
 {
-    /// <summary>Escrita no PSG (AY-3-8910): <c>P0</c> = registrador, <c>P1</c> = valor.</summary>
+    /// <summary>PSG (AY-3-8910) write: <c>P0</c> = register, <c>P1</c> = value.</summary>
     Psg = 0,
 
-    /// <summary>Escrita no SCC: <c>P0</c> = porta, <c>P1</c> = registrador, <c>P2</c> = valor.</summary>
+    /// <summary>SCC write: <c>P0</c> = port, <c>P1</c> = register, <c>P2</c> = value.</summary>
     Scc = 1,
 }
 
-/// <summary>Uma escrita de registrador de chip com o instante em que aconteceu.</summary>
+/// <summary>A chip register write with the instant it happened.</summary>
 public readonly struct VgmEvent
 {
-    /// <summary>Cria o evento.</summary>
+    /// <summary>Creates the event.</summary>
     public VgmEvent(long sample, VgmEventKind kind, byte p0, byte p1, byte p2)
     {
         Sample = sample;
@@ -27,30 +27,30 @@ public readonly struct VgmEvent
         P2 = p2;
     }
 
-    /// <summary>Instante em amostras de 44100 Hz (base de tempo do VGM).</summary>
+    /// <summary>Instant in 44100 Hz samples (the VGM time base).</summary>
     public long Sample { get; }
 
-    /// <summary>Chip que recebeu a escrita.</summary>
+    /// <summary>Chip that received the write.</summary>
     public VgmEventKind Kind { get; }
 
-    /// <summary>Registrador (PSG) ou porta (SCC).</summary>
+    /// <summary>Register (PSG) or port (SCC).</summary>
     public byte P0 { get; }
 
-    /// <summary>Valor (PSG) ou registrador (SCC).</summary>
+    /// <summary>Value (PSG) or register (SCC).</summary>
     public byte P1 { get; }
 
-    /// <summary>Valor (SCC) â€” ignorado no PSG.</summary>
+    /// <summary>Value (SCC) — unused for the PSG.</summary>
     public byte P2 { get; }
 }
 
 /// <summary>
-/// Leitor de arquivos VGM (Video Game Music) restrito ao que o MSX usa: escritas no PSG
-/// (<c>0xA0</c>) e no SCC (<c>0xD2</c>) com os comandos de espera.
+/// VGM (Video Game Music) reader restricted to what the MSX uses: PSG writes (<c>0xA0</c>) and SCC
+/// writes (<c>0xD2</c>) plus the wait commands.
 /// </summary>
 /// <remarks>
-/// O VGM Ã© o "log exato" que o openMSX grava das escritas de registrador: Ã© a fonte da verdade
-/// lossless do som do original. Aqui ele Ã© lido para uma lista de eventos; quem transforma em
-/// Ã¡udio Ã© o <see cref="Mixing.MsxSoundRenderer"/>.
+/// The VGM is the exact "log" openMSX records of the register writes: it is the lossless source of
+/// truth for the original sound. Here it is read into an event list; the
+/// <see cref="Mixing.MsxSoundRenderer"/> turns it into audio.
 /// </remarks>
 public sealed class VgmFile
 {
@@ -62,44 +62,44 @@ public sealed class VgmFile
         Events = events;
     }
 
-    /// <summary>Nome do arquivo (sem extensÃ£o).</summary>
+    /// <summary>File name (without extension).</summary>
     public string Name { get; }
 
-    /// <summary>Clock do PSG em Hz (do cabeÃ§alho; padrÃ£o MSX 1789772,5).</summary>
+    /// <summary>PSG clock in Hz (from the header; MSX default 1789772.5).</summary>
     public double AyClock { get; }
 
-    /// <summary>DuraÃ§Ã£o total capturada, em amostras de 44100 Hz.</summary>
+    /// <summary>Total captured duration, in 44100 Hz samples.</summary>
     public long TotalSamples { get; private set; }
 
-    /// <summary>Escritas de registrador, em ordem de tempo.</summary>
+    /// <summary>Register writes, in time order.</summary>
     public IReadOnlyList<VgmEvent> Events { get; }
 
-    /// <summary>InÃ­cio do loop em amostras de 44100 Hz (-1 = sem loop conhecido).</summary>
+    /// <summary>Loop start in 44100 Hz samples (-1 = no known loop).</summary>
     public long LoopSample { get; private set; } = -1;
 
-    /// <summary>DuraÃ§Ã£o do loop em amostras de 44100 Hz (0 = sem loop conhecido).</summary>
+    /// <summary>Loop duration in 44100 Hz samples (0 = no known loop).</summary>
     public long LoopDuration { get; private set; }
 
-    /// <summary>Tem loop definido?</summary>
+    /// <summary>Has a defined loop?</summary>
     public bool HasLoop => LoopSample >= 0 && LoopDuration > 0;
 
-    /// <summary>InÃ­cio do loop em segundos.</summary>
+    /// <summary>Loop start in seconds.</summary>
     public double LoopStartSeconds => LoopSample / 44100.0;
 
-    /// <summary>DuraÃ§Ã£o do loop em segundos.</summary>
+    /// <summary>Loop duration in seconds.</summary>
     public double LoopSeconds => LoopDuration / 44100.0;
 
-    /// <summary>DuraÃ§Ã£o total capturada em segundos.</summary>
+    /// <summary>Total captured duration in seconds.</summary>
     public double TotalSeconds => TotalSamples / 44100.0;
 
-    /// <summary>Define o loop (em segundos) â€” usado pelo detector ou por um manifesto.</summary>
+    /// <summary>Sets the loop (in seconds) — used by the detector or by a manifest.</summary>
     public void SetLoop(double startSeconds, double durationSeconds)
     {
         LoopSample = (long)Math.Round(startSeconds * 44100.0);
         LoopDuration = (long)Math.Round(durationSeconds * 44100.0);
     }
 
-    /// <summary>LÃª um VGM do disco.</summary>
+    /// <summary>Loads a VGM from disk.</summary>
     public static VgmFile Load(string path)
     {
         byte[] data = File.ReadAllBytes(path);
@@ -119,11 +119,11 @@ public sealed class VgmFile
         return new VgmFile(name, ayClock, totalSamples, list.ToArray());
     }
 
-    /// <summary>LÃª um VGM em memÃ³ria.</summary>
+    /// <summary>Parses a VGM from memory.</summary>
     public static VgmFile Parse(byte[] data, string name = "vgm")
     {
         if (data.Length < 0x40 || data[0] != (byte)'V' || data[1] != (byte)'g' || data[2] != (byte)'m' || data[3] != (byte)' ')
-            throw new InvalidDataException($"{name}: nÃ£o Ã© um arquivo VGM.");
+            throw new InvalidDataException($"{name}: not a VGM file.");
 
         uint version = ReadU32(data, 0x08);
         long total = ReadU32(data, 0x18);
@@ -187,7 +187,7 @@ public sealed class VgmFile
         return file;
     }
 
-    /// <summary>Tamanho total (em bytes) de um comando VGM, para pular o que nÃ£o interessa.</summary>
+    /// <summary>Total size (in bytes) of a VGM command, to skip what we do not care about.</summary>
     private static int CommandSize(byte cmd) => cmd switch
     {
         >= 0x30 and <= 0x3F => 2,
@@ -205,4 +205,3 @@ public sealed class VgmFile
     private static uint ReadU32(byte[] d, int offset) =>
         (uint)(d[offset] | (d[offset + 1] << 8) | (d[offset + 2] << 16) | (d[offset + 3] << 24));
 }
-

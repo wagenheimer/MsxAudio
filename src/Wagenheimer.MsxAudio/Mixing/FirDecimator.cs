@@ -3,13 +3,13 @@ using System;
 namespace Wagenheimer.MsxAudio.Mixing;
 
 /// <summary>
-/// Filtro FIR de decimação com estado (sinc com janela Blackman), usado para tirar o
-/// serrilhado de amostrar os chips numa taxa alta e baixar para a taxa de saída.
+/// Stateful FIR decimator (Blackman-windowed sinc), used to remove the aliasing of sampling the
+/// chips at a high rate and bring the signal down to the output rate.
 /// </summary>
 /// <remarks>
-/// O fator é inteiro (2, 4, 8…): a cada <see cref="Factor"/> amostras de entrada sai uma de
-/// saída. O estado (histórico) é mantido entre chamadas, então dá para usar tanto no render
-/// offline quanto no streaming em tempo real sem descontinuidade.
+/// The factor is an integer (2, 4, 8…): every <see cref="Factor"/> input samples produce one output
+/// sample. The history is kept between calls, so it works both for offline rendering and for
+/// real-time streaming without discontinuity.
 /// </remarks>
 public sealed class FirDecimator
 {
@@ -21,9 +21,9 @@ public sealed class FirDecimator
     private float[] _workL = Array.Empty<float>();
     private float[] _workR = Array.Empty<float>();
 
-    /// <summary>Cria o decimador.</summary>
-    /// <param name="factor">Fator de decimação (1 = sem decimação).</param>
-    /// <param name="tapsPerPhase">Quantidade de coeficientes por fase (maior = corte mais seco).</param>
+    /// <summary>Creates the decimator.</summary>
+    /// <param name="factor">Decimation factor (1 = no decimation).</param>
+    /// <param name="tapsPerPhase">Taps per phase (higher = sharper cutoff).</param>
     public FirDecimator(int factor, int tapsPerPhase = 12)
     {
         if (factor < 1) throw new ArgumentOutOfRangeException(nameof(factor));
@@ -31,16 +31,16 @@ public sealed class FirDecimator
         _factor = factor;
         int tapCount = factor * Math.Max(4, tapsPerPhase) + 1;
         _half = tapCount / 2;
-        // corte em 0,45 do Nyquist de saída (passa tudo até ~21,6 kHz em 48 kHz)
+        // cutoff at 0.45 of the output Nyquist (passes everything up to ~21.6 kHz at 48 kHz)
         _taps = DesignLowPass(tapCount, 0.45 / factor);
         _historyL = new float[tapCount - 1];
         _historyR = new float[tapCount - 1];
     }
 
-    /// <summary>Fator de decimação.</summary>
+    /// <summary>Decimation factor.</summary>
     public int Factor => _factor;
 
-    /// <summary>Processa um bloco: <paramref name="countIn"/> amostras entram, <paramref name="countOut"/> saem.</summary>
+    /// <summary>Processes a block: <paramref name="countIn"/> samples in, <paramref name="countOut"/> out.</summary>
     public void Process(float[] inputL, float[] inputR, int countIn, float[] outputL, float[] outputR, int countOut)
     {
         if (_factor == 1)
@@ -86,7 +86,7 @@ public sealed class FirDecimator
         Array.Copy(_workR, workLength - historyLength, _historyR, 0, historyLength);
     }
 
-    /// <summary>Zera o histórico (reinício de reprodução).</summary>
+    /// <summary>Clears the history (playback restart).</summary>
     public void Reset()
     {
         Array.Clear(_historyL);

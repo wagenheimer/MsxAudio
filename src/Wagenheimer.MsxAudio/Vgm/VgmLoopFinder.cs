@@ -3,26 +3,26 @@ using System;
 namespace Wagenheimer.MsxAudio.Vgm;
 
 /// <summary>
-/// Descobre o ponto exato de loop de um VGM comparando a sequência de escritas de registrador.
+/// Finds a VGM's exact loop point by comparing the sequence of register writes.
 /// </summary>
 /// <remarks>
-/// O VGM gravado pelo openMSX não traz a informação de loop (o driver de som do jogo é que
-/// decide repetir). A repetição aparece no log como uma sequência de escritas <b>idêntica</b>
-/// ao trecho anterior. Procurar essa repetição dá o loop com precisão de amostra — é isso que
-/// elimina o "estalo" na emenda que o corte por tempo de uma gravação separada produzia.
+/// A VGM recorded by openMSX carries no loop information (the game's sound driver decides to
+/// repeat). The repetition shows up in the log as a sequence of writes <b>identical</b> to an
+/// earlier section. Finding that repetition gives the loop with sample accuracy — which is what
+/// removes the "click" at the seam that cutting a separate audio recording used to produce.
 /// </remarks>
 public static class VgmLoopFinder
 {
     /// <summary>
-    /// Encontra o loop do VGM.
+    /// Finds the VGM loop.
     /// </summary>
-    /// <param name="vgm">Arquivo lido.</param>
+    /// <param name="vgm">Parsed file.</param>
     /// <param name="minSpanSeconds">
-    /// Quanto tempo a repetição precisa se manter para ser aceita (25 s por padrão). Evita
-    /// confundir um compasso repetido com o loop da música.
+    /// How long the repetition must hold to be accepted (25 s by default). Avoids mistaking a
+    /// repeated bar for the song loop.
     /// </param>
-    /// <param name="log">Diagnóstico opcional (candidatos avaliados).</param>
-    /// <returns>Início e duração do loop em segundos, ou <c>null</c> se não houver.</returns>
+    /// <param name="log">Optional diagnostics (evaluated candidates).</param>
+    /// <returns>Loop start and duration in seconds, or <c>null</c> when there is none.</returns>
     public static (double Start, double Duration)? Find(
         VgmFile vgm,
         double minSpanSeconds = 25.0,
@@ -32,7 +32,7 @@ public static class VgmLoopFinder
         int n = events.Count;
         if (n < 200) return null;
 
-        // Assinatura compacta de cada escrita (para comparar rápido).
+        // Compact signature of each write (for fast comparison).
         int[] signature = new int[n];
         long[] times = new long[n];
         for (int i = 0; i < n; i++)
@@ -63,9 +63,9 @@ public static class VgmLoopFinder
                 long period = times[start + k] - times[start];
                 if (period <= 0) continue;
 
-                // Loop de verdade: a sequência se repete por pelo menos um período inteiro.
-                // Se a captura terminou antes, aceita quando o trecho repetido cobre ~o período
-                // (é o caso de músicas longas gravadas por pouco tempo além de um loop).
+                // A real loop: the sequence repeats for at least one whole period. If the capture
+                // ended first, accept when the repeated section covers ~the period (long songs
+                // recorded only a little beyond one loop).
                 bool fullPeriod = run >= k;
                 bool reachedEnd = start + run + k >= n;
                 bool accepted = fullPeriod
@@ -74,7 +74,7 @@ public static class VgmLoopFinder
                 if (!accepted) continue;
 
                 log?.Invoke(
-                    $"candidato start={times[start] / 44100.0:F3}s period={period / 44100.0:F3}s run={run} span={span / 44100.0:F2}s idx={start},{k}");
+                    $"candidate start={times[start] / 44100.0:F3}s period={period / 44100.0:F3}s run={run} span={span / 44100.0:F2}s idx={start},{k}");
                 return (times[start] / 44100.0, period / 44100.0);
             }
         }
