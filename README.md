@@ -140,7 +140,8 @@ What you see:
   **peak-hold caps**, so the quiet harmonics and short transients stay visible;
 - **PIANO ROLL**: the last 12 s with a **mini keyboard** on the left, octave lines, time grid, one
   colour per channel, and a short tail on every note so fast arpeggios stay **stacked as chords**;
-  muted/soloed channels draw dimmed;
+  muted/soloed channels draw dimmed. Under it, a **whole-song map** (one row per channel, brightness =
+  activity) shows where the song is busy and where it is calm — **click or drag it to jump** anywhere;
 - **PIANO** with three octaves: the bars under each key show which **notes the song is playing** right
   now (one colour per channel, **stacked** when two channels play the same note), and clicking a key
   auditions that instrument — the same PSG envelope/ noise and SCC wave the song uses, mixed over the

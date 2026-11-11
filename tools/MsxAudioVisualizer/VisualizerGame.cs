@@ -94,6 +94,11 @@ public sealed class VisualizerGame : Game
     private PanelView _view = PanelView.Spectrum;
     private const double RollSeconds = 12.0;
     private const double NoteTailSeconds = 0.09;
+    private const int SongMapBuckets = 192;
+
+    // Whole-song density map (8 x buckets) and its clickable area (design coordinates).
+    private float[][]? _songMap;
+    private Rectangle _songMapHit;
 
     // One distinct, saturated colour per channel. PSG uses warm hues, SCC uses cool ones, so the
     // chip is recognisable at a glance while every channel is still told apart (roll, piano, strips).
@@ -324,6 +329,7 @@ public sealed class VisualizerGame : Game
 
             _player = new VgmPlayer(vgm, loop: true, sampleRate: 48000, oversample: _profile.Oversample, profile: _profile);
             ApplyStartupMix(_player);
+            _songMap = SongMap.Build(vgm, SongMapBuckets);
             _heldKeyMidi = -1;
             _auditionTimer = 0f;
 
@@ -369,7 +375,10 @@ public sealed class VisualizerGame : Game
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
         if (_statusTimer > 0) _statusTimer -= dt;
 
-        HandleInput();
+        // A screenshot run must be reproducible: ignore keyboard and mouse (a stray Tab or click
+        // during the few frames of the gate would change the view or the track).
+        if (!_shotPending)
+            HandleInput();
 
         if (_player is not null && !_recording)
         {
@@ -657,6 +666,16 @@ public sealed class VisualizerGame : Game
         if (down && _seekBar.Width > 0 && _seekBar.Contains(p))
         {
             double t = (p.X - _seekBar.Left) / (double)_seekBar.Width * _player.TotalSeconds;
+            _player.Seek(Math.Clamp(t, 0, _player.TotalSeconds));
+            if (pressed) ClearNotes();
+            if (pressed) FlushAudio();
+            return;
+        }
+
+        // Song map (piano-roll footer): click or drag to jump anywhere in the track.
+        if (down && _view == PanelView.Roll && _songMapHit.Width > 0 && _songMapHit.Contains(p))
+        {
+            double t = (p.X - _songMapHit.Left) / (double)_songMapHit.Width * _player.TotalSeconds;
             _player.Seek(Math.Clamp(t, 0, _player.TotalSeconds));
             if (pressed) ClearNotes();
             if (pressed) FlushAudio();
@@ -1322,15 +1341,19 @@ public sealed class VisualizerGame : Game
             lx += 42;
         }
 
+        Text("MAP BELOW: CLICK TO SEEK", x + 440, y + 7, Dim);
+
         const int gutter = 22;   // mini keyboard on the left
         const int axis = 10;     // time labels under the plot
+        const int mapH = 36;     // whole-song density map
         int left = x + 10 + gutter, top = y + 24;
-        int innerW = w - gutter - 22, innerH = h - 34 - axis;
-
+        int innerW = w - gutter - 22;
+        int innerH = h - 34 - axis - mapH - 4;
+        int mapY = top + innerH + 2;
+        int axisY = mapY + mapH + 2;
         const int lowMidi = 24, highMidi = 96;   // C1..C7
         int semis = highMidi - lowMidi + 1;
         int step = Math.Max(2, innerH / semis);
-        int axisY = top + innerH + 2;
 
         int RowY(int midi) => top + innerH - (midi - lowMidi + 1) * innerH / semis;
         int RowH() => Math.Max(2, innerH / semis - 1);
@@ -1415,6 +1438,72 @@ public sealed class VisualizerGame : Game
 
         // "Now" line at the right edge.
         Rect(left + innerW - 1, top, 2, innerH, Accent);
+
+        DrawSongMap(left, mapY, innerW, mapH);
+    }
+
+    /// <summary>
+    /// Whole-song density map under the roll: one row per channel, brightness = how busy that channel
+    /// is at that moment. Click or drag it to jump anywhere; the last 12 s (the roll window) and the
+    /// loop window are highlighted.
+    /// </summary>
+    private void DrawSongMap(int left, int mapY, int innerW, int mapH)
+    {
+        if (_player is null || _songMap is null)
+            return;
+
+        double total = Math.Max(0.001, _player.TotalSeconds);
+        int buckets = _songMap[0].Length;
+
+        Rect(left, mapY, innerW, mapH, PanelColor);
+
+        // Window currently shown by the roll (the right-hand 12 s).
+        int windowX = left + (int)(innerW * Math.Clamp((total - RollSeconds) / total, 0, 1));
+        Rect(windowX, mapY, Math.Max(1, left + innerW - windowX), mapH, new Color(26, 34, 46));
+
+        int rowH = Math.Max(2, (mapH - 2) / 8);
+        float bucketW = innerW / (float)buckets;
+
+        for (int ch = 0; ch < 8; ch++)
+        {
+            var baseColor = IsAudible(ch) ? ChannelColors[ch] : Dim;
+            int ry = mapY + 1 + ch * rowH;
+            var row = _songMap[ch];
+
+            for (int b = 0; b < buckets; b++)
+            {
+                float value = row[b];
+                if (value <= 0.02f)
+                    continue;
+
+                int x0 = (int)(b * bucketW);
+                int x1 = (int)((b + 1) * bucketW);
+                int bx = left + x0;
+                int bw = Math.Max(1, x1 - x0);
+
+                var color = Color.Lerp(PanelColor, baseColor, 0.25f + 0.75f * Math.Min(1f, value));
+                Rect(bx, ry, bw, Math.Max(1, rowH - 1), color);
+            }
+        }
+
+        // Loop window edges.
+        var song = _player.Song;
+        if (song.HasLoop)
+        {
+            int lx = left + (int)(innerW * Math.Clamp(song.LoopStartSeconds / total, 0, 1));
+            int lw = Math.Max(2, (int)(innerW * Math.Clamp(song.LoopSeconds / total, 0, 1)));
+            Rect(lx, mapY, 1, mapH, Dim);
+            Rect(Math.Min(lx + lw, left + innerW - 1), mapY, 1, mapH, Dim);
+        }
+
+        // Playhead.
+        int px = left + (int)(innerW * Math.Clamp(_player.Time / total, 0, 1));
+        Rect(Math.Clamp(px - 1, left, left + innerW - 2), mapY, 2, mapH, Accent);
+
+        Rect(left, mapY, innerW, 1, Grid);
+        Rect(left, mapY + mapH - 1, innerW, 1, Grid);
+
+        _songMapHit = new Rectangle(left, mapY, innerW, mapH);
     }
 
     /// <summary>
@@ -1890,6 +1979,7 @@ public sealed class VisualizerGame : Game
             "SPACE          PAUSE / RESUME",
             "LEFT / RIGHT   SEEK -/+ 5 S",
             "CLICK BAR      SEEK TO POSITION",
+            "CLICK MAP      JUMP ANYWHERE IN THE SONG",
             "CLICK LABEL    SOLO THAT CHANNEL",
             "P / S          TOGGLE PSG / SCC",
             "1 2 3          PSG CHANNELS",
