@@ -26,6 +26,14 @@ public sealed class VgmPlayer : IDisposable
     private readonly KonamiScc _scc;
     private readonly FirDecimator _decimator;
 
+    // Audition: a second chip pair plays notes triggered from the piano without touching the song.
+    private readonly Ay8910 _psgTry;
+    private readonly KonamiScc _sccTry;
+    private readonly float[][] _psgTryBuf;
+    private readonly float[][] _sccTryBuf;
+    private int _tryChannel = -1;
+    private int _tryRemaining;
+
     private readonly float[][] _psgBuf;
     private readonly float[][] _sccBuf;
     private readonly float[] _mixL;
@@ -69,9 +77,15 @@ public sealed class VgmPlayer : IDisposable
         _scc = new KonamiScc(SccClock, internalRate);
         _decimator = new FirDecimator(_oversample);
 
+        // The audition chips are silent until a key is pressed; they never touch the song state.
+        _psgTry = new Ay8910(vgm.AyClock, internalRate);
+        _sccTry = new KonamiScc(SccClock, internalRate);
+
         int capacity = MaxFrames * _oversample;
         _psgBuf = new[] { new float[capacity], new float[capacity], new float[capacity] };
         _sccBuf = Enumerable.Range(0, 5).Select(_ => new float[capacity]).ToArray();
+        _psgTryBuf = new[] { new float[capacity], new float[capacity], new float[capacity] };
+        _sccTryBuf = Enumerable.Range(0, 5).Select(_ => new float[capacity]).ToArray();
         _mixL = new float[capacity];
         _mixR = new float[capacity];
         _decL = new float[MaxFrames];
@@ -146,6 +160,109 @@ public sealed class VgmPlayer : IDisposable
     }
 
     public AudioProfile Profile => _profile;
+
+    /// <summary>Channel currently auditioning (0..7), or -1 when idle.</summary>
+    public int AuditionChannel => _tryRemaining > 0 ? _tryChannel : -1;
+
+    /// <summary>MIDI note currently auditioning, or -1 when idle.</summary>
+    public int AuditionNote => _tryRemaining > 0 ? _auditionNote : -1;
+
+    private int _auditionNote = -1;
+
+    /// <summary>True while an audition note is still sounding.</summary>
+    public bool HasAudition => _tryRemaining > 0;
+
+    /// <summary>
+    /// Plays a note on a channel using the instrument the song is using right now (PSG envelope and
+    /// noise, SCC wave RAM), without disturbing the song. The note is mixed into the normal output.
+    /// </summary>
+    /// <param name="channel">0..2 = PSG1..3, 3..7 = SCC1..5.</param>
+    /// <param name="midi">MIDI note (60 = C4).</param>
+    /// <param name="seconds">Note length in seconds.</param>
+    public void Audition(int channel, int midi, double seconds = 0.9)
+    {
+        if (channel < 0 || channel >= ChannelCount || midi < 0 || midi > 127)
+            return;
+
+        _tryChannel = channel;
+        _tryRemaining = Math.Max(
+            1,
+            (int)Math.Round(Math.Max(0.05, seconds) * SampleRate * _oversample));
+        _auditionNote = midi;
+
+        double frequency = 440.0 * Math.Pow(2, (midi - 69) / 12.0);
+
+        if (channel < 3)
+        {
+            AuditionPsg(channel, frequency);
+            return;
+        }
+
+        AuditionScc(channel - 3, frequency);
+    }
+
+    /// <summary>Stops any audition note immediately (key off + silence).</summary>
+    public void StopAudition()
+    {
+        _tryRemaining = 0;
+        _auditionNote = -1;
+
+        for (int ch = 0; ch < 3; ch++)
+            _psgTry.Write(8 + ch, 0);
+
+        _sccTry.Write(3, 0, 0);
+    }
+
+    private void AuditionPsg(int channel, double frequency)
+    {
+        // Same instrument as the song: envelope period/shape, noise frequency and mixer routing,
+        // but a single channel keyed and the pitch taken from the requested note.
+        _psgTry.Write(6, _psgRegs[6]);
+        _psgTry.Write(11, _psgRegs[11]);
+        _psgTry.Write(12, _psgRegs[12]);
+        _psgTry.Write(13, _psgRegs[13]);
+
+        bool songToneOn = (_psgRegs[7] & (1 << channel)) == 0;
+        bool songNoiseOn = (_psgRegs[7] & (1 << (channel + 3))) == 0;
+
+        // Disable tone and noise on the two channels that are not auditioning.
+        int mixer = 0x07 & ~(1 << channel);
+        mixer |= 0x38 & ~(1 << (channel + 3));
+        if (!songToneOn) mixer |= 1 << channel;
+        if (!songNoiseOn) mixer |= 1 << (channel + 3);
+        _psgTry.Write(7, mixer);
+
+        int volume = _psgRegs[8 + channel] & 0x0F;
+        if (volume < 12) volume = 12;   // audition at a usable level; the timbre is in wave/envelope
+
+        for (int ch = 0; ch < 3; ch++)
+            _psgTry.Write(8 + ch, ch == channel ? volume : 0);
+
+        int period = (int)Math.Round(_psg.Clock / (16.0 * frequency) - 1);
+        period = Math.Clamp(period, 1, 4095);
+        _psgTry.Write(channel * 2, period & 0xFF);
+        _psgTry.Write(channel * 2 + 1, (period >> 8) & 0x0F);
+    }
+
+    private void AuditionScc(int sccChannel, double frequency)
+    {
+        // Copy the instrument (32-sample wave) into bank 0 of the audition chip, so the pitch does
+        // not depend on which bank the song happens to use.
+        for (int i = 0; i < 32; i++)
+            _sccTry.Write(0, i, _scc.GetWaveSample(sccChannel, i) & 0xFF);
+
+        int period = (int)Math.Round(SccClock / (32.0 * frequency) - 1);
+        period = Math.Clamp(period, 0, 4095);
+
+        _sccTry.Write(1, 0, period & 0xFF);
+        _sccTry.Write(1, 1, (period >> 8) & 0x0F);
+
+        int volume = _sccVolume[sccChannel];
+        if (volume < 12) volume = 12;   // audition at a usable level
+        _sccTry.Write(2, 0, volume);
+
+        _sccTry.Write(3, 0, 1);
+    }
 
     /// <summary>Ring of decimated samples per channel.</summary>
     public float[] ChannelScope(int channel) => _channelRing[channel];
@@ -259,7 +376,12 @@ public sealed class VgmPlayer : IDisposable
             }
         }
 
-        // 3) Decimate to the output rate, fill the scopes.
+        // 3) Audition: a separate chip pair plays the notes triggered from the piano, mixed over the
+        // song without touching its register state.
+        if (_tryRemaining > 0)
+            MixAudition(inCount);
+
+        // 4) Decimate to the output rate, fill the scopes.
         _decimator.Process(_mixL, _mixR, inCount, _decL, _decR, frames);
 
         for (int i = 0; i < frames; i++)
@@ -272,7 +394,7 @@ public sealed class VgmPlayer : IDisposable
             _scopePos = (_scopePos + 1) % _scopeRing.Length;
         }
 
-        // 4) Per-channel scope (one point per output frame) + levels.
+        // 5) Per-channel scope (one point per output frame) + levels.
         for (int ch = 0; ch < ChannelCount; ch++)
         {
             float[] buf = ch < 3 ? _psgBuf[ch] : _sccBuf[ch - 3];
@@ -304,7 +426,7 @@ public sealed class VgmPlayer : IDisposable
         _internalPos += inCount;
         _samplePos += (long)Math.Round(frames * 44100.0 / SampleRate);
 
-        // 5) Loop / end.
+        // 6) Loop / end.
         if (_samplePos >= _vgm.TotalSamples)
         {
             if (_loop)
@@ -312,6 +434,82 @@ public sealed class VgmPlayer : IDisposable
             else
                 _finished = true;
         }
+    }
+
+    /// <summary>
+    /// Renders the audition note alone (no song), for when playback is paused. The song position
+    /// does not advance; only the audition chips are clocked.
+    /// </summary>
+    public void RenderAudition(float[] destination, int frames)
+    {
+        if (frames <= 0)
+            return;
+
+        int os = _oversample;
+        int inCount = frames * os;
+        if (inCount > _mixL.Length)
+            throw new ArgumentOutOfRangeException(nameof(frames), "chunk too large (max 2048 frames)");
+
+        Array.Clear(_mixL, 0, inCount);
+        Array.Clear(_mixR, 0, inCount);
+
+        if (_tryRemaining > 0)
+            MixAudition(inCount);
+
+        _decimator.Process(_mixL, _mixR, inCount, _decL, _decR, frames);
+
+        for (int i = 0; i < frames; i++)
+        {
+            destination[i * 2] = Math.Clamp(_decL[i], -1f, 1f);
+            destination[i * 2 + 1] = Math.Clamp(_decR[i], -1f, 1f);
+        }
+    }
+
+    private void MixAudition(int inCount)
+    {
+        int count = Math.Min(inCount, _tryRemaining);
+        if (count <= 0)
+        {
+            StopAudition();
+            return;
+        }
+
+        const float auditionBoost = 1.35f;
+
+        if (_tryChannel < 3)
+        {
+            _psgTry.Render(_psgTryBuf[0], _psgTryBuf[1], _psgTryBuf[2], 0, count);
+
+            float[] buf = _psgTryBuf[_tryChannel];
+            var (pl, pr) = _psgPan[_tryChannel];
+            float gain = _profile.PsgGain * _profile.MasterGain * auditionBoost;
+
+            for (int i = 0; i < count; i++)
+            {
+                float v = buf[i] * gain;
+                _mixL[i] += v * pl;
+                _mixR[i] += v * pr;
+            }
+        }
+        else
+        {
+            _sccTry.Render(_sccTryBuf, 0, count);
+
+            float[] buf = _sccTryBuf[0];
+            var (pl, pr) = _sccPan[Math.Clamp(_tryChannel - 3, 0, 4)];
+            float gain = _profile.SccGain * _profile.MasterGain * auditionBoost;
+
+            for (int i = 0; i < count; i++)
+            {
+                float v = buf[i] * gain;
+                _mixL[i] += v * pl;
+                _mixR[i] += v * pr;
+            }
+        }
+
+        _tryRemaining -= inCount;
+        if (_tryRemaining <= 0)
+            StopAudition();
     }
 
     private void JumpToLoop()
@@ -363,8 +561,8 @@ public sealed class VgmPlayer : IDisposable
             case 2: // volume
                 if (e.P1 < 5) _sccVolume[e.P1] = e.P2 & 0x0F;
                 break;
-            case 3: // key on/off (5 bits)
-                _sccKeyMask = e.P1;
+            case 3: // key on/off (5 bits) — the value travels in the third byte
+                _sccKeyMask = e.P2;
                 break;
         }
     }

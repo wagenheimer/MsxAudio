@@ -87,8 +87,12 @@ public sealed class VisualizerGame : Game
         Enumerable.Range(0, 8).Select(_ => new List<NoteEvent>()).ToArray();
 
     private readonly int[] _lastMidi = Enumerable.Repeat(-1, 8).ToArray();
-    private bool _showRoll;
+
+    private enum PanelView { Spectrum, Roll, Piano }
+
+    private PanelView _view = PanelView.Spectrum;
     private const double RollSeconds = 12.0;
+    private const double NoteTailSeconds = 0.09;
 
     private static readonly Color[] ChannelColors =
     {
@@ -114,6 +118,19 @@ public sealed class VisualizerGame : Game
     // Track rows (design coordinates, filled by DrawPlaylist).
     private readonly List<(Rectangle Rect, int Index)> _trackHit = new();
 
+    // Piano panel (design coordinates, filled by DrawPiano).
+    private readonly Rectangle[] _pianoChannelHit = new Rectangle[8];
+    private Rectangle _pianoAllHit;
+    private Rectangle _pianoOctDownHit, _pianoOctUpHit;
+    private int _pianoChannel;
+    private int _pianoBaseMidi = 48;      // C3 at the left edge; 3 octaves visible
+    private float _auditionTimer;         // time left to feed the audition while paused
+    private bool _demoRunning;
+    private int _demoChannel = -1;
+    private float _demoTimer;
+    private readonly Rectangle[] _pianoKeyRect = new Rectangle[128];
+    private readonly int[] _keyLit = new int[128];
+
     // Recording.
     private bool _recording;
     private string _recordDir = string.Empty;
@@ -125,10 +142,15 @@ public sealed class VisualizerGame : Game
     private int _gifWidth, _gifHeight, _gifFactor = 1;
 
     public VisualizerGame(string? file, string? recordPath = null, int recordSeconds = 10, int recordFps = 30,
-        int windowWidth = VW, int windowHeight = VH, AudioProfile? profile = null, bool startRoll = false)
+        int windowWidth = VW, int windowHeight = VH, AudioProfile? profile = null, string? startView = null)
     {
         _profile = profile ?? AudioProfile.Stereo;
-        _showRoll = startRoll;
+        _view = startView?.ToLowerInvariant() switch
+        {
+            "roll" or "pianoroll" => PanelView.Roll,
+            "piano" or "keys" => PanelView.Piano,
+            _ => PanelView.Spectrum,
+        };
         _graphics = new GraphicsDeviceManager(this)
         {
             PreferredBackBufferWidth = Math.Max(640, windowWidth),
@@ -310,12 +332,21 @@ public sealed class VisualizerGame : Game
         {
             UpdateMeters(dt);
 
+            if (_auditionTimer > 0)
+                _auditionTimer -= dt;
+
+            UpdateInstrumentDemo(dt);
+
             if (!_paused)
             {
                 if (_player.Finished && _autoNext && _tracks.Count > 0)
                     LoadTrack((_selected + 1) % _tracks.Count);
 
                 Feed();
+            }
+            else
+            {
+                FeedPausedAudition();
             }
         }
 
@@ -391,17 +422,46 @@ public sealed class VisualizerGame : Game
         while (_sound.PendingBufferCount < 3 && guard++ < 4)
         {
             _player.Render(_render, ChunkFrames);
-
-            for (int i = 0; i < _render.Length; i++)
-            {
-                short v = (short)Math.Clamp((int)Math.Round(_render[i] * 32767f), short.MinValue, short.MaxValue);
-                _pcm[i * 2] = (byte)(v & 0xFF);
-                _pcm[i * 2 + 1] = (byte)((v >> 8) & 0xFF);
-            }
-
-            try { _sound.SubmitBuffer(_pcm); }
-            catch (InvalidOperationException) { break; }
+            SubmitPcm();
         }
+    }
+
+    /// <summary>Feeds the audition alone while the song is paused (the song position does not move).</summary>
+    private void FeedPausedAudition()
+    {
+        if (_sound is null || _player is null)
+            return;
+
+        if (_auditionTimer <= 0)
+        {
+            if (_sound.State == SoundState.Playing)
+                _sound.Stop();
+
+            return;
+        }
+
+        if (_sound.State != SoundState.Playing)
+            _sound.Play();
+
+        int guard = 0;
+        while (_sound.PendingBufferCount < 3 && guard++ < 4)
+        {
+            _player.RenderAudition(_render, ChunkFrames);
+            SubmitPcm();
+        }
+    }
+
+    private void SubmitPcm()
+    {
+        for (int i = 0; i < _render.Length; i++)
+        {
+            short v = (short)Math.Clamp((int)Math.Round(_render[i] * 32767f), short.MinValue, short.MaxValue);
+            _pcm[i * 2] = (byte)(v & 0xFF);
+            _pcm[i * 2 + 1] = (byte)((v >> 8) & 0xFF);
+        }
+
+        try { _sound!.SubmitBuffer(_pcm); }
+        catch (InvalidOperationException) { }
     }
 
     private bool Pressed(Keys key) => _keys.IsKeyDown(key) && !_prevKeys.IsKeyDown(key);
@@ -421,11 +481,7 @@ public sealed class VisualizerGame : Game
             _showHelp = !_showHelp;
 
         if (Pressed(Keys.Tab))
-        {
-            _showRoll = !_showRoll;
-            _status = _showRoll ? "PIANO ROLL" : "SPECTRUM";
-            _statusTimer = 2f;
-        }
+            CycleView();
 
         if (Pressed(Keys.Up) && _tracks.Count > 0)
         {
@@ -445,7 +501,10 @@ public sealed class VisualizerGame : Game
         if (Pressed(Keys.Space) && _sound is not null)
         {
             _paused = !_paused;
-            if (_paused) _sound.Pause(); else _sound.Resume();
+            if (_paused)
+                _sound.Pause();
+            else
+                FlushAudio();
         }
 
         if (Pressed(Keys.R) && _player is not null)
@@ -531,13 +590,62 @@ public sealed class VisualizerGame : Game
         if (!pressed)
             return;
 
-        // Header toggle: spectrum <-> piano roll.
+        // Header toggle: cycle spectrum -> piano roll -> piano.
         if (_viewToggleHit.Contains(p))
         {
-            _showRoll = !_showRoll;
-            _status = _showRoll ? "PIANO ROLL" : "SPECTRUM";
-            _statusTimer = 2f;
+            CycleView();
             return;
+        }
+
+        // Piano view: channel selectors, "play all", octave and the keys themselves.
+        if (_view == PanelView.Piano)
+        {
+            for (int ch = 0; ch < 8; ch++)
+            {
+                if (!_pianoChannelHit[ch].Contains(p))
+                    continue;
+
+                _pianoChannel = ch;
+                _status = "AUDITION " + ChannelName(ch);
+                _statusTimer = 2f;
+                return;
+            }
+
+            if (_pianoAllHit.Contains(p))
+            {
+                ToggleInstrumentDemo();
+                return;
+            }
+
+            if (_pianoOctDownHit.Contains(p))
+            {
+                ShiftPianoOctave(-1);
+                return;
+            }
+
+            if (_pianoOctUpHit.Contains(p))
+            {
+                ShiftPianoOctave(1);
+                return;
+            }
+
+            // Black keys overlap the white ones, so they are tested first.
+            for (int pass = 0; pass < 2; pass++)
+            {
+                bool black = pass == 0;
+                for (int midi = 0; midi < 128; midi++)
+                {
+                    var rect = _pianoKeyRect[midi];
+                    if (rect.IsEmpty || Notes[midi % 12].Contains('#') != black)
+                        continue;
+
+                    if (!rect.Contains(p))
+                        continue;
+
+                    PlayPiano(midi);
+                    return;
+                }
+            }
         }
 
         // Per-channel S (solo) and M (mute) buttons, then the label (solo too).
@@ -570,6 +678,91 @@ public sealed class VisualizerGame : Game
     }
 
     private static string ChannelName(int ch) => ch < 3 ? $"PSG{ch + 1}" : $"SCC{ch - 2}";
+
+    /// <summary>Plays a note with the currently selected channel.</summary>
+    private void PlayPiano(int midi) => PlayPianoFor(_pianoChannel, midi);
+
+    /// <summary>
+    /// Auditions <paramref name="midi"/> with <paramref name="channel"/>'s instrument. Works while the
+    /// song is paused too: the audition is rendered alone and fed to the sound card.
+    /// </summary>
+    private void PlayPianoFor(int channel, int midi)
+    {
+        if (_player is null)
+            return;
+
+        _player.Audition(channel, midi, 0.85);
+        _auditionTimer = 1.05f;
+
+        _status = $"{ChannelName(channel)} {NoteName(FrequencyOf(midi))}";
+        _statusTimer = 2f;
+
+        if (_paused && _sound is not null)
+        {
+            // The song is paused: drop its queued buffers so the audition is heard immediately.
+            _sound.Stop();
+            _sound.Play();
+        }
+    }
+
+    private void ShiftPianoOctave(int delta)
+    {
+        _pianoBaseMidi = Math.Clamp(_pianoBaseMidi + delta * 12, 24, 72);
+        _status = "OCTAVE " + (_pianoBaseMidi / 12 - 1);
+        _statusTimer = 2f;
+    }
+
+    private void ToggleInstrumentDemo()
+    {
+        if (_demoRunning)
+        {
+            _demoRunning = false;
+            _demoChannel = -1;
+            _player?.StopAudition();
+            _status = "DEMO STOPPED";
+            _statusTimer = 2f;
+            return;
+        }
+
+        _demoRunning = true;
+        _demoChannel = -1;
+        _demoTimer = 0f;
+        _status = "PLAYING ALL INSTRUMENTS";
+        _statusTimer = 2f;
+    }
+
+    /// <summary>Walks the 8 channels, playing each instrument at the note the song is using.</summary>
+    private void UpdateInstrumentDemo(float dt)
+    {
+        if (!_demoRunning || _player is null)
+            return;
+
+        _demoTimer -= dt;
+        if (_demoTimer > 0)
+            return;
+
+        _demoChannel++;
+        if (_demoChannel >= 8)
+        {
+            _demoRunning = false;
+            _demoChannel = -1;
+            return;
+        }
+
+        _pianoChannel = _demoChannel;
+        PlayPianoFor(_demoChannel, DemoNote(_demoChannel));
+        _demoTimer = 0.95f;
+    }
+
+    private int DemoNote(int channel)
+    {
+        if (_player is null)
+            return 60;
+
+        var info = _player.Channels[channel];
+        int midi = info.Key && info.Frequency >= 20 ? MidiOf(info.Frequency) : 60;
+        return Math.Clamp(midi, _pianoBaseMidi, _pianoBaseMidi + 35);
+    }
 
     private void CycleProfile()
     {
@@ -625,7 +818,12 @@ public sealed class VisualizerGame : Game
             for (int i = i0; i < i1; i++)
                 value = Math.Max(value, _fftMagnitude[i]);
 
-            _bars[b] = Math.Max(value, _bars[b] * 0.86f);
+            // dB scale: 0 dB = full scale, -60 dB = floor. A linear bar would make everything but
+            // the fundamental invisible; this is how audio analysers show the whole range.
+            float db = 20f * MathF.Log10(Math.Max(value, 1e-5f));
+            float norm = Math.Clamp((db + 60f) / 60f, 0f, 1f);
+
+            _bars[b] = Math.Max(norm, _bars[b] - 0.03f);
         }
     }
 
@@ -648,11 +846,20 @@ public sealed class VisualizerGame : Game
 
         if (_player is not null)
         {
-            if (_showRoll)
-                DrawRoll();
-            else
-                DrawSpectrum();
-            DrawScope();
+            switch (_view)
+            {
+                case PanelView.Roll:
+                    DrawRoll();
+                    break;
+                case PanelView.Piano:
+                    DrawPiano();
+                    break;
+                default:
+                    DrawSpectrum();
+                    DrawScope();
+                    break;
+            }
+
             DrawChannels();
         }
         else
@@ -825,13 +1032,34 @@ public sealed class VisualizerGame : Game
     {
         const int x = 336, y = 104, w = VW - 348, h = 182;
         Panel(x, y, w, h);
+
         Text("SPECTRUM", x + 10, y + 6, Accent);
-        DrawViewToggle(x + w - 92, y + 2, "PIANO ROLL");
+        string next = NextViewLabel();
+        DrawViewToggle(x + w - PixelFont.Measure(next) - 22, y + 2, next);
 
-        int left = x + 10, top = y + 22, innerW = w - 20, innerH = h - 32;
+        // Room for the dB scale on the left and the frequency labels under the plot.
+        const int gutter = 40;
+        const int footer = 12;
+        int left = x + gutter, top = y + 22;
+        int innerW = w - gutter - 12, innerH = h - 34 - footer;
 
-        for (int i = 1; i < 4; i++)
-            Rect(left, top + innerH * i / 4, innerW, 1, Grid);
+        // dB grid: 0 (full scale) down to -60 dB.
+        for (int db = 0; db >= -60; db -= 20)
+        {
+            int gy = top + (int)((1 - (db + 60) / 60f) * (innerH - 1));
+            Rect(left, gy, innerW, 1, Grid);
+            Text(db == 0 ? "0 DB" : $"{db}", x + 8, gy - 3, db == 0 ? TextColor : Dim);
+        }
+
+        // Frequency grid (log axis, matching the bars).
+        foreach (double freq in FrequencyMarks)
+        {
+            int gx = BarX(freq, left, innerW);
+            Rect(gx, top, 1, innerH, Grid);
+
+            string label = freq >= 1000 ? $"{freq / 1000:0}K" : $"{freq:0}";
+            Text(label, gx + 3, top + innerH + 2, Dim);
+        }
 
         float barW = innerW / (float)SpectrumBars;
         for (int b = 0; b < SpectrumBars; b++)
@@ -847,36 +1075,91 @@ public sealed class VisualizerGame : Game
         }
     }
 
-    /// <summary>Scrolling piano roll: time to the right, pitch up, one colour per channel.</summary>
+    private static readonly double[] FrequencyMarks = { 100, 1000, 10000 };
+
+    /// <summary>Horizontal position of a frequency on the log-spaced spectrum axis.</summary>
+    private static int BarX(double frequency, int left, int innerW)
+    {
+        double bin = frequency * FftSize / 48000.0;
+        double norm = Math.Log(Math.Max(1.0, bin)) / Math.Log(FftSize / 2.0);
+        return left + (int)Math.Round(Math.Clamp(norm, 0, 1) * (innerW - 1));
+    }
+
+    /// <summary>
+    /// Scrolling piano roll: time to the right, pitch up, one colour per channel. Arpeggios leave a
+    /// short tail, so fast SCC runs and PSG chords stay stacked (a chord is visible, not a staircase
+    /// of disconnected dots).
+    /// </summary>
     private void DrawRoll()
     {
-        const int x = 336, y = 104, w = VW - 348, h = 182;
+        const int x = 336, y = 104, w = VW - 348, h = 326;
         Panel(x, y, w, h);
+
         Text("PIANO ROLL", x + 10, y + 6, Accent);
-        DrawViewToggle(x + w - 108, y + 2, "SPECTRUM");
 
-        int left = x + 10, top = y + 22, innerW = w - 20, innerH = h - 32;
-        const int lowMidi = 21, highMidi = 108;
+        string next = NextViewLabel();
+        DrawViewToggle(x + w - PixelFont.Measure(next) - 22, y + 2, next);
 
-        int PitchY(int midi) => top + innerH - (midi - lowMidi) * innerH / (highMidi - lowMidi);
-
-        // Octave lines (C2..C8).
-        for (int midi = 24; midi <= highMidi; midi += 12)
+        // Channel legend (same colours as the notes).
+        int lx = x + 88;
+        for (int ch = 0; ch < 8; ch++)
         {
-            int py = PitchY(midi);
-            if (py < top) break;
+            Rect(lx, y + 8, 5, 5, ChannelColors[ch]);
+            Text(ChannelName(ch), lx + 8, y + 7, Dim);
+            lx += 42;
+        }
+
+        const int gutter = 22;   // mini keyboard on the left
+        const int axis = 10;     // time labels under the plot
+        int left = x + 10 + gutter, top = y + 24;
+        int innerW = w - gutter - 22, innerH = h - 34 - axis;
+
+        const int lowMidi = 24, highMidi = 96;   // C1..C7
+        int semis = highMidi - lowMidi + 1;
+        int step = Math.Max(2, innerH / semis);
+        int axisY = top + innerH + 2;
+
+        int RowY(int midi) => top + innerH - (midi - lowMidi + 1) * innerH / semis;
+        int RowH() => Math.Max(2, innerH / semis - 1);
+
+        // Mini keyboard gutter (white/black rows) with the C labels.
+        for (int midi = lowMidi; midi <= highMidi; midi++)
+        {
+            bool black = Notes[midi % 12].Contains('#');
+            Rect(x + 10, RowY(midi), gutter - 2, RowH(),
+                black ? new Color(44, 52, 64) : new Color(140, 152, 166));
+        }
+
+        for (int midi = lowMidi; midi <= highMidi; midi += 12)
+        {
+            int py = RowY(midi);
             Rect(left, py, innerW, 1, Grid);
-            Text(Notes[midi % 12] + (midi / 12 - 1), x + w - 26, py - 3, Dim);
+            if (py >= top + 4)
+                Text("C" + (midi / 12 - 1), left + 3, py - 3, Dim);
+        }
+
+        // Time grid every 2 s (0 = now at the right edge).
+        for (int s = 0; s <= (int)RollSeconds; s += 2)
+        {
+            int gx = left + (int)(innerW * (1 - s / RollSeconds));
+            if (s > 0)
+                Rect(gx, top, 1, innerH, Grid);
+
+            string label = s == 0 ? "NOW" : $"-{s}S";
+            int tx = s == 0 ? gx - PixelFont.Measure(label) + 1 : gx + 2;
+            Text(label, tx, axisY, s == 0 ? Accent : Dim);
         }
 
         if (_player is null)
             return;
 
         double now = _player.Time;
+        int? solo = _player.SoloChannel;
 
         for (int ch = 0; ch < 8; ch++)
         {
-            var color = ChannelColors[ch];
+            bool audible = !_player.ChannelMuted[ch] && (solo is null || solo == ch);
+            var color = audible ? ChannelColors[ch] : Dim;
             var list = _notes[ch];
 
             for (int i = 0; i < list.Count; i++)
@@ -886,12 +1169,13 @@ public sealed class VisualizerGame : Game
                     continue;
 
                 double t0 = e.Time;
-                double t1 = i + 1 < list.Count ? list[i + 1].Time : now;
+                double nextTime = i + 1 < list.Count ? list[i + 1].Time : now;
+                double t1 = Math.Min(nextTime, now) + NoteTailSeconds;
                 if (t1 <= t0)
                     continue;
 
                 int midi = (int)Math.Round(69 + 12 * Math.Log2(e.Frequency / 440.0));
-                int py = PitchY(Math.Clamp(midi, lowMidi, highMidi));
+                int py = RowY(Math.Clamp(midi, lowMidi, highMidi));
 
                 int px0 = left + (int)(innerW * (1 - (now - t0) / RollSeconds));
                 int px1 = left + (int)(innerW * (1 - (now - t1) / RollSeconds));
@@ -901,16 +1185,171 @@ public sealed class VisualizerGame : Game
                 px0 = Math.Clamp(px0, left, left + innerW - 1);
                 px1 = Math.Clamp(px1, left, left + innerW);
 
-                int thickness = 2 + (int)Math.Round(Math.Clamp(e.Volume, 0f, 1f) * 3f);
+                int thickness = Math.Clamp(3 + (int)Math.Round(Math.Clamp(e.Volume, 0f, 1f) * 4f), 3, Math.Max(3, step));
                 Rect(px0, py, Math.Max(1, px1 - px0), thickness, color);
             }
         }
 
         // "Now" line at the right edge.
-        Rect(left + innerW - 1, top, 1, innerH, Accent);
+        Rect(left + innerW - 1, top, 2, innerH, Accent);
     }
 
-    private void DrawScope()    {
+    /// <summary>
+    /// Playable three-octave keyboard. Clicking a key auditions the selected channel with the very
+    /// instrument the song is using (PSG envelope/noise or SCC wave RAM); the bars at the bottom of
+    /// each key show which notes each channel of the song is playing right now.
+    /// </summary>
+    private void DrawPiano()
+    {
+        const int x = 336, y = 104, w = VW - 348, h = 326;
+        Panel(x, y, w, h);
+
+        Text("PIANO", x + 10, y + 6, Accent);
+        Text("CLICK A KEY TO HEAR THE INSTRUMENT", x + 74, y + 7, Dim);
+
+        string next = NextViewLabel();
+        DrawViewToggle(x + w - PixelFont.Measure(next) - 22, y + 2, next);
+
+        // Channel selector: the key plays the instrument of the selected channel.
+        int rowY = y + 24;
+        for (int ch = 0; ch < 8; ch++)
+        {
+            var rect = new Rectangle(x + 10 + ch * 46, rowY, 42, 16);
+            _pianoChannelHit[ch] = rect;
+            DrawButton(rect, ChannelName(ch), _pianoChannel == ch, ChannelColors[ch]);
+        }
+
+        _pianoAllHit = new Rectangle(x + 10 + 8 * 46 + 8, rowY, 80, 16);
+        DrawButton(_pianoAllHit, _demoRunning ? "STOP" : "PLAY ALL", _demoRunning, Accent);
+
+        int navX = _pianoAllHit.Right + 16;
+        _pianoOctDownHit = new Rectangle(navX, rowY, 20, 16);
+        _pianoOctUpHit = new Rectangle(navX + 24, rowY, 20, 16);
+        DrawButton(_pianoOctDownHit, "<", false, Accent);
+        DrawButton(_pianoOctUpHit, ">", false, Accent);
+        Text($"OCT {_pianoBaseMidi / 12 - 1}", navX + 52, rowY + 5, Dim);
+
+        int kx = x + 12, ky = y + 50, kw = w - 24, kh = h - 64;
+        const int whiteCount = 21;                 // 3 octaves
+        int whiteW = kw / whiteCount;
+
+        Array.Clear(_pianoKeyRect);
+
+        // Which notes the song is playing right now (bit per channel on the MIDI note).
+        Array.Clear(_keyLit);
+        var player = _player!;
+        for (int ch = 0; ch < 8; ch++)
+        {
+            var info = player.Channels[ch];
+            if (!info.Key || info.Frequency < 20)
+                continue;
+
+            int midi = MidiOf(info.Frequency);
+            if (midi is >= 0 and < 128)
+                _keyLit[midi] |= 1 << ch;
+        }
+
+        int auditionNote = player.AuditionNote;
+
+        // White keys first, then the black ones on top (drawing order = z order).
+        int wi = 0;
+        for (int midi = _pianoBaseMidi; midi < _pianoBaseMidi + 36; midi++)
+        {
+            if (Notes[midi % 12].Contains('#'))
+                continue;
+
+            var rect = new Rectangle(kx + wi * whiteW, ky, whiteW - 1, kh);
+            _pianoKeyRect[midi] = rect;
+
+            var fill = midi == auditionNote ? new Color(255, 224, 150) : new Color(215, 223, 232);
+            Rect(rect, fill);
+            Rect(rect.X, rect.Y, 1, rect.Height, new Color(150, 162, 176));
+            wi++;
+        }
+
+        for (int midi = _pianoBaseMidi; midi < _pianoBaseMidi + 36; midi++)
+        {
+            if (!Notes[midi % 12].Contains('#'))
+                continue;
+
+            int bw = Math.Max(10, (int)(whiteW * 0.62f));
+
+            // Centre the black key on the boundary of the white keys around it.
+            int before = WhiteIndexBefore(_pianoBaseMidi, midi);
+            var rect = new Rectangle(kx + before * whiteW - bw / 2, ky, bw, (int)(kh * 0.62f));
+
+            _pianoKeyRect[midi] = rect;
+
+            var fill = midi == auditionNote ? new Color(120, 92, 26) : new Color(24, 30, 40);
+            Rect(rect, fill);
+        }
+
+        // Octave labels on the white C keys.
+        for (int midi = _pianoBaseMidi; midi < _pianoBaseMidi + 36; midi += 12)
+        {
+            var rect = _pianoKeyRect[midi];
+            if (rect.IsEmpty)
+                continue;
+
+            Text("C" + (midi / 12 - 1), rect.X + (rect.Width - 12) / 2, rect.Bottom - 26, new Color(70, 82, 96));
+        }
+
+        // Song notes: one coloured bar per channel, stacked at the bottom of the key.
+        for (int midi = _pianoBaseMidi; midi < _pianoBaseMidi + 36; midi++)
+        {
+            int mask = _keyLit[midi];
+            if (mask == 0)
+                continue;
+
+            var rect = _pianoKeyRect[midi];
+            if (rect.IsEmpty)
+                continue;
+
+            int band = 0;
+            for (int ch = 0; ch < 8; ch++)
+            {
+                if ((mask & (1 << ch)) == 0)
+                    continue;
+
+                Rect(rect.X + 2, rect.Bottom - 8 - band * 4, rect.Width - 4, 4, ChannelColors[ch]);
+                band++;
+            }
+        }
+
+        // Audition note marker.
+        if (auditionNote is >= 0 and < 128)
+        {
+            var rect = _pianoKeyRect[auditionNote];
+            if (!rect.IsEmpty)
+                Rect(rect.X, rect.Y, rect.Width, 3, Accent);
+        }
+
+        var target = player.Channels[_pianoChannel];
+        int targetNote = target.Key && target.Frequency >= 20 ? MidiOf(target.Frequency) : -1;
+        string playing = targetNote >= 0 ? NoteName(target.Frequency) : "---";
+        Text($"{ChannelName(_pianoChannel)}  {playing}  VOL {target.Volume * 100:0}%  " +
+             $"OCT {_pianoBaseMidi / 12 - 1}  ({(_pianoChannel < 3 ? "PSG" : "SCC")} INSTRUMENT)",
+            x + 12, ky + kh + 6, Dim);
+    }
+
+    /// <summary>Index (0-based) of the white key that starts before <paramref name="midi"/>.</summary>
+    private static int WhiteIndexBefore(int baseMidi, int midi)
+    {
+        int index = 0;
+        for (int m = baseMidi; m < midi; m++)
+            if (!Notes[m % 12].Contains('#'))
+                index++;
+
+        return index;
+    }
+
+    private static int MidiOf(double frequency) =>
+        (int)Math.Round(69 + 12 * Math.Log2(frequency / 440.0));
+
+    private static double FrequencyOf(int midi) => 440.0 * Math.Pow(2, (midi - 69) / 12.0);
+
+    private void DrawScope()
+    {
         const int x = 336, y = 292, w = VW - 348, h = 138;
         Panel(x, y, w, h);
         Text("MASTER", x + 10, y + 6, Accent);
@@ -1075,8 +1514,43 @@ public sealed class VisualizerGame : Game
         }
     }
 
-    // Clickable "SPECTRUM / PIANO ROLL" toggle in the panel header.
+    // Clickable "next view" toggle in the panel header.
     private Rectangle _viewToggleHit;
+
+    private void CycleView()
+    {
+        _view = _view switch
+        {
+            PanelView.Spectrum => PanelView.Roll,
+            PanelView.Roll => PanelView.Piano,
+            _ => PanelView.Spectrum,
+        };
+
+        if (_view != PanelView.Piano && _demoRunning)
+        {
+            _demoRunning = false;
+            _demoChannel = -1;
+            _player?.StopAudition();
+        }
+
+        _status = ViewName(_view);
+        _statusTimer = 2f;
+    }
+
+    private static string ViewName(PanelView view) => view switch
+    {
+        PanelView.Roll => "PIANO ROLL",
+        PanelView.Piano => "PIANO",
+        _ => "SPECTRUM",
+    };
+
+    /// <summary>Label of the view that the header button switches to.</summary>
+    private string NextViewLabel() => ViewName(_view switch
+    {
+        PanelView.Spectrum => PanelView.Roll,
+        PanelView.Roll => PanelView.Piano,
+        _ => PanelView.Spectrum,
+    });
 
     private void DrawViewToggle(int x, int y, string label)
     {
@@ -1086,10 +1560,14 @@ public sealed class VisualizerGame : Game
         Text(label, x + 6, y + 5, Dim);
     }
 
-    private void DrawButton(Rectangle rect, string label, bool active, Color activeColor)    {
+    private void DrawButton(Rectangle rect, string label, bool active, Color activeColor)
+    {
         Rect(rect, active ? activeColor : Grid);
         Rect(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2, active ? PanelHi : PanelColor);
-        Text(label, rect.X + rect.Width / 2 - 2, rect.Y + 3, active ? activeColor : Dim);
+
+        int tw = Math.Max(0, PixelFont.Measure(label) - 1);
+        Text(label, rect.X + (rect.Width - tw) / 2, rect.Y + (rect.Height - 7) / 2,
+            active ? activeColor : Dim);
     }
 
     private static readonly string[] Notes = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
@@ -1115,7 +1593,7 @@ public sealed class VisualizerGame : Game
         string chipState = p is null ? "" : $"PSG[{(p.PsgEnabled ? "ON" : "OFF")}] SCC[{(p.SccEnabled ? "ON" : "OFF")}]{(p.SoloChannel is int s ? "  SOLO " + ChannelName(s) : "")}";
         Text(chipState, 16, VH - 50, TextColor);
 
-        Text("UP/DOWN TRACK   ENTER PLAY   SPACE PAUSE   LEFT/RIGHT SEEK   CLICK: TRACK / SEEK BAR / S-M", 16, VH - 36, Dim);
+        Text("TAB/HEADER VIEW   UP/DOWN TRACK   ENTER PLAY   SPACE PAUSE   LEFT/RIGHT SEEK   CLICK: TRACK / BAR / S-M", 16, VH - 36, Dim);
         Text("P PSG   S SCC   1-8 CHANNEL   O PROFILE   L AUTONEXT   R RESTART   H HELP   ESC QUIT", 16, VH - 22, Dim);
 
         if (_statusTimer > 0)
@@ -1127,7 +1605,7 @@ public sealed class VisualizerGame : Game
 
     private void DrawHelp()
     {
-        const int w = 640, h = 286;
+        const int w = 660, h = 330;
         int x = (VW - w) / 2, y = (VH - h) / 2;
         Panel(x, y, w, h, PanelHi);
         Rect(x, y, w, 24, PanelColor);
@@ -1135,6 +1613,7 @@ public sealed class VisualizerGame : Game
 
         string[] lines =
         {
+            "TAB / HEADER   SPECTRUM / PIANO ROLL / PIANO",
             "UP / DOWN      SELECT TRACK",
             "ENTER          PLAY SELECTED",
             "SPACE          PAUSE / RESUME",
@@ -1149,6 +1628,10 @@ public sealed class VisualizerGame : Game
             "R              RESTART",
             "H              THIS HELP",
             "ESC            QUIT",
+            "",
+            "PIANO: CLICK A KEY TO HEAR THE SELECTED CHANNEL'S",
+            "INSTRUMENT (WORKS WHILE PAUSED). 'PLAY ALL' WALKS",
+            "THE 8 CHANNELS; '<' / '>' CHANGE THE OCTAVE.",
             "",
             "DRAG A .VGM FILE INTO THE WINDOW TO PLAY IT",
             "MSXAUDIOVISUALIZER SONG.VGM --RECORD OUT.GIF --SECONDS 10",

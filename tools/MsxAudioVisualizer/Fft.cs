@@ -67,7 +67,10 @@ public static class Fft
         for (int i = 0; i < n / 2; i++)
         {
             double mag = Math.Sqrt(re[i] * re[i] + im[i] * im[i]) / n;
-            magnitude[i] = (float)Math.Min(1.0, Math.Sqrt(mag * 40.0));
+
+            // Normalised linear amplitude (1.0 = full-scale sine after the Hann window). The caller
+            // converts it to dB; the old sqrt-compression hid how loud the peaks really are.
+            magnitude[i] = (float)Math.Min(1.0, mag * 4.0);
         }
     }
 

@@ -119,16 +119,31 @@ shows everything the chips are doing.
 | `4 5 6 7 8` | SCC channels 1..5 |
 | `O` | mixing profile (`original` / `stereo` / `remaster`) |
 | `L` | auto-next |
-| `Tab` (or the header button) | switch **spectrum** ↔ **piano roll** |
+| `Tab` (or the header button) | cycle **spectrum** → **piano roll** → **piano** |
 | `R` | restart |
 | `H` | help overlay |
 | `Esc` | quit |
 
+In the **piano** view:
+
+| Action | Result |
+| :--- | :--- |
+| click a key | plays that note with the **selected channel's instrument** (works while paused) |
+| `PSG1…SCC5` | selects which channel's instrument the keys use |
+| `PLAY ALL` | walks the 8 channels, playing each instrument at the note the song is using |
+| `<` / `>` | shifts the keyboard one octave (3 octaves on screen) |
+
 What you see:
 
 - **POSITION** bar with `current / total`, the loop window and a marker — click or drag to seek;
-- **SPECTRUM** (log-spaced FFT) or **PIANO ROLL** (`Tab`): the roll scrolls the last 12 s with one
-  colour per channel, pitch on the vertical axis and the octave labels on the right;
+- **SPECTRUM** in **dB** (`0` to `-60 dB`) with a frequency axis at **100 Hz / 1 kHz / 10 kHz**, so the
+  quiet harmonics are visible instead of being flattened;
+- **PIANO ROLL**: the last 12 s with a **mini keyboard** on the left, octave lines, time grid, one
+  colour per channel, and a short tail on every note so fast arpeggios stay **stacked as chords**;
+  muted/soloed channels draw dimmed;
+- **PIANO** with three octaves: the bars under each key show which **notes the song is playing** right
+  now (one colour per channel), and clicking a key auditions that instrument — the same PSG envelope/
+  noise and SCC wave the song uses, mixed over the music;
 - the **MASTER** oscilloscope and the per-channel scopes draw a **min/max envelope** per pixel column,
   so peaks stay visible instead of being averaged away;
 - one strip per channel (PSG blue, SCC green) with live oscilloscope, volume, level with **peak
@@ -160,6 +175,9 @@ MsxAudioVisualizer music/stage_a.vgm --width 1600 --height 900
 
 # start with the piano roll instead of the spectrum
 MsxAudioVisualizer music/stage_a.vgm --roll
+
+# start on the playable piano
+MsxAudioVisualizer music/stage_a.vgm --view piano
 ```
 
 Recording is **deterministic**: every frame advances exactly `1/fps` seconds of music, independent of
@@ -311,7 +329,7 @@ profiles/                             per-game extraction profiles (JSON)
    hardware cadence (then loop detection works and no external emulator is needed).
 2. A `play` CLI command that streams through `MsxAudioEngine` (live preview).
 3. Optional `SoundEffect`-based player for projects that cannot use `DynamicSoundEffectInstance`.
-4. Per-channel note history in the roll: chords per channel (today the roll shows one line per channel).
+4. A "song map" view in the roll (density per channel over the whole track, jump by clicking it).
 
 ## Tests
 

@@ -16,6 +16,7 @@ namespace Wagenheimer.MsxAudio.Visualizer;
 ///   --fps N                     recording frame rate (default 30)
 ///   --width / --height          initial window size
 ///   --profile name              mixing profile (original | stereo | remaster)
+///   --view name                 start view: spectrum | roll | piano (--roll is kept as an alias)
 ///   --audio-only out.wav        render the audio only, without opening a window
 /// </code>
 /// With no positional argument it scans the current directory for <c>.vgm</c> files.
@@ -33,7 +34,7 @@ public static class Program
         int fps = 30;
         int width = 1280;
         int height = 720;
-        bool roll = false;
+        string? view = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -59,7 +60,10 @@ public static class Program
                     if (i + 1 < args.Length && int.TryParse(args[++i], out int ih)) height = ih;
                     break;
                 case "--roll":
-                    roll = true;
+                    view = "roll";
+                    break;
+                case "--view":
+                    if (i + 1 < args.Length) view = args[++i];
                     break;
                 case "--profile":
                     if (i + 1 < args.Length) profileName = args[++i];
@@ -81,6 +85,13 @@ public static class Program
 
         Console.WriteLine($"[Visualizer] file={file ?? "(none)"} dir={dir} record={record ?? (audioOnly is null ? "(live)" : "(audio only)")}");
 
+        // Resolve output paths before the working directory is switched to the song folder, so a
+        // relative --record/--audio-only path lands where the command was run.
+        if (!string.IsNullOrWhiteSpace(record))
+            record = Path.GetFullPath(record);
+        if (!string.IsNullOrWhiteSpace(audioOnly))
+            audioOnly = Path.GetFullPath(audioOnly);
+
         if (!string.IsNullOrWhiteSpace(audioOnly))
         {
             if (file is null)
@@ -95,7 +106,7 @@ public static class Program
 
         Directory.SetCurrentDirectory(dir);
 
-        using var game = new VisualizerGame(file, record, seconds, fps, width, height, AudioProfile.ByName(profileName), roll);
+        using var game = new VisualizerGame(file, record, seconds, fps, width, height, AudioProfile.ByName(profileName), view);
         game.Run();
     }
 
