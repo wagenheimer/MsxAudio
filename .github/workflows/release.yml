@@ -1,0 +1,90 @@
+name: MSXScope builds
+
+# Every push to main produces downloadable binaries; a v* tag also publishes a GitHub Release
+# with the same archives. The version comes from the tag through MinVer (see the csproj).
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: publish ${{ matrix.rid }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid:
+          - win-x64
+          - win-arm64
+          - linux-x64
+          - linux-arm64
+          - osx-x64
+          - osx-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish (self-contained)
+        run: >
+          dotnet publish tools/MsxAudioVisualizer/MsxAudioVisualizer.csproj
+          -c Release -r ${{ matrix.rid }} --self-contained true
+          -p:DebugType=None -p:DebugSymbols=false
+          -o "dist/MSXScope-${{ matrix.rid }}"
+
+      - name: Archive
+        shell: bash
+        run: |
+          cd dist
+          if [[ "${{ matrix.rid }}" == win-* ]]; then
+            zip -r "MSXScope-${{ matrix.rid }}.zip" "MSXScope-${{ matrix.rid }}"
+          else
+            tar -czf "MSXScope-${{ matrix.rid }}.tar.gz" "MSXScope-${{ matrix.rid }}"
+          fi
+          ls -lh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MSXScope-${{ matrix.rid }}
+          path: dist/MSXScope-${{ matrix.rid }}.*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist/*.zip dist/*.tar.gz)
+          echo "Uploading: ${files[*]}"
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+              --title "MSXScope $GITHUB_REF_NAME" \
+              --generate-notes
+          fi

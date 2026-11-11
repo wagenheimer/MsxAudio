@@ -19,6 +19,7 @@ namespace Wagenheimer.MsxAudio.Visualizer;
 ///   --view name                 start view: spectrum | roll | piano (--roll is kept as an alias)
 ///   --recursive                 scan subfolders when a folder is given
 ///   --audio-only out.wav        render the audio only, without opening a window
+///   --version                   print the version and exit
 /// </code>
 /// With no positional argument it reopens the last folder from the settings file.
 /// </summary>
@@ -77,6 +78,9 @@ public static class Program
                 case "--no-recursive":
                     recursive = false;
                     break;
+                case "--version":
+                    Console.WriteLine($"MSXScope {AppVersion.Value}");
+                    return;
                 default:
                     if (File.Exists(arg))
                     {

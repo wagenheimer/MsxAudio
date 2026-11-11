@@ -12,6 +12,9 @@ instruments, and GIF/MP4 export.
 [![NuGet](https://img.shields.io/nuget/v/Wagenheimer.MsxAudio?logo=nuget&label=Wagenheimer.MsxAudio)](https://www.nuget.org/packages/Wagenheimer.MsxAudio)
 [![NuGet](https://img.shields.io/nuget/v/Wagenheimer.MsxAudio.MonoGame?logo=nuget&label=Wagenheimer.MsxAudio.MonoGame)](https://www.nuget.org/packages/Wagenheimer.MsxAudio.MonoGame)
 [![Downloads](https://img.shields.io/nuget/dt/Wagenheimer.MsxAudio)](https://www.nuget.org/packages/Wagenheimer.MsxAudio)
+[![Build & test](https://github.com/wagenheimer/MsxAudio/actions/workflows/ci.yml/badge.svg)](https://github.com/wagenheimer/MsxAudio/actions/workflows/ci.yml)
+[![MSXScope builds](https://github.com/wagenheimer/MsxAudio/actions/workflows/release.yml/badge.svg)](https://github.com/wagenheimer/MsxAudio/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/v/release/wagenheimer/MsxAudio?label=MSXScope)](https://github.com/wagenheimer/MsxAudio/releases)
 [![License](https://img.shields.io/github/license/wagenheimer/MsxAudio)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](#requirements)
 [![C#](https://img.shields.io/badge/C%23-pure%20core-239120?logo=csharp)](#architecture)
@@ -31,6 +34,7 @@ dotnet add package Wagenheimer.MsxAudio.MonoGame  # optional MonoGame bridge
 - [The chips](#the-chips)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
+- [Downloads](#downloads)
 - [MSXScope (visual player)](#msxscope-visual-player)
 - [The `.msxaudio` format](#the-msxaudio-format)
 - [Playback engine](#playback-engine)
@@ -39,6 +43,7 @@ dotnet add package Wagenheimer.MsxAudio.MonoGame  # optional MonoGame bridge
 - [Mixing profiles](#mixing-profiles)
 - [Validation](#validation)
 - [Architecture](#architecture)
+- [Versioning](#versioning)
 - [Status and roadmap](#status-and-roadmap)
 - [Tests](#tests)
 - [Legal](#legal)
@@ -108,6 +113,22 @@ player.Update();                           // keeps the buffer queue full
 
 `Render(float[] destination, int frames)` also gives you **interleaved stereo** if you want to feed
 another backend (SDL, NAudio, a custom mixer, the visualizer…).
+
+## Downloads
+
+**MSXScope** is built for six targets by GitHub Actions, self-contained (no .NET install needed):
+
+| OS | Architectures | Archive |
+| :--- | :--- | :--- |
+| Windows | x64, arm64 | `.zip` |
+| Linux | x64, arm64 | `.tar.gz` |
+| macOS | x64 (Intel), arm64 (Apple silicon) | `.tar.gz` |
+
+- **Releases** (`v*` tags) attach all six archives: [github.com/wagenheimer/MsxAudio/releases](https://github.com/wagenheimer/MsxAudio/releases).
+- **Every push to `main`** publishes the same builds as workflow artifacts (30-day retention) in the
+  [MSXScope builds](https://github.com/wagenheimer/MsxAudio/actions/workflows/release.yml) tab.
+- Unpack and run `MSXScope` (on macOS/Linux the binary keeps the executable bit; macOS may ask to
+  confirm the first launch because the app is not code-signed).
 
 ## MSXScope (visual player)
 
@@ -340,6 +361,21 @@ tools/MsxAudioVisualizer/             MSXScope: MonoGame visual player (PSG/SCC,
 tests/Wagenheimer.MsxAudio.Tests/     chips, VGM, package, engine, MSX machine
 profiles/                             per-game extraction profiles (JSON)
 ```
+
+## Versioning
+
+The library follows [Semantic Versioning](https://semver.org/) (`Wagenheimer.MsxAudio` is at 1.0.0)
+and the changelog is in [CHANGELOG.md](CHANGELOG.md). **MSXScope** takes its version from the git
+tag through [MinVer](https://github.com/adamralph/minver):
+
+```bash
+MSXScope --version                 # e.g. 1.0.0, or 1.0.1-alpha.0.7 between tags
+git tag v1.2.0 && git push origin v1.2.0   # publishes a release with the six archives
+```
+
+`v*` tags produce a GitHub Release; commits after a tag are versioned
+`<next>-alpha.0.<commit count>`, so every build is traceable to a commit without hand-editing a
+version file.
 
 ## Status and roadmap
 

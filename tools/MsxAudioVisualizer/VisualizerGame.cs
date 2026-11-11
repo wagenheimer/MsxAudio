@@ -198,7 +198,7 @@ public sealed partial class VisualizerGame : Game
         Content.RootDirectory = "Content";
         IsMouseVisible = true;
         Window.AllowUserResizing = true;
-        Window.Title = "MSXScope — MSX audio player & chip analyser (PSG AY-3-8910 + Konami SCC)";
+        Window.Title = $"MSXScope v{AppVersion.Value} — MSX audio player & chip analyser (PSG AY-3-8910 + Konami SCC)";
 
         _startFile = file;
 

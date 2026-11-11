@@ -397,6 +397,9 @@ public sealed partial class VisualizerGame : Game
         Rect(x, y, w, 24, PanelColor);
         Text("HELP", x + 10, y + 8, Accent);
 
+        string version = "V" + AppVersion.Value;
+        Text(version, x + w - 10 - PixelFont.Measure(version), y + 8, Dim);
+
         string[] lines =
         {
             "TAB / HEADER   SPECTRUM / PIANO ROLL / PIANO",
