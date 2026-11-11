@@ -19,12 +19,13 @@ public sealed partial class VisualizerGame : Game
 
     // ── Folder browser ───────────────────────────────────────────────────────────
     private string _browserDir = string.Empty;
-    private readonly List<(string Name, string Path)> _browserDirs = new();
+    private readonly List<(string Label, string Path, bool Parent)> _browserRows = new();
     private readonly List<VgmEntry> _browserFiles = new();
     private int _browserDirSel;
     private int _browserFileSel;
     private int _browserDirFirst;
     private int _browserFileFirst;
+    private int _browserFolderRows = DialogRows;
     private bool _browserRecursive;
     private bool _browserFocusFiles;
     private bool _browserScanning;
@@ -35,6 +36,8 @@ public sealed partial class VisualizerGame : Game
     private int _browserWheel;
     private readonly List<(Rectangle Rect, int Index)> _browserDirHit = new();
     private readonly List<(Rectangle Rect, int Index)> _browserFileHit = new();
+    private readonly List<(Rectangle Rect, string Path)> _browserCrumbHit = new();
+    private readonly List<(Rectangle Rect, string Path)> _browserRecentHit = new();
     private Rectangle _browserUpHit, _browserRecursiveHit, _browserPlayHit, _browserCancelHit, _browserCloseHit;
     private Rectangle _profileButtonHit;
 
@@ -70,8 +73,15 @@ public sealed partial class VisualizerGame : Game
             return;
         }
 
-        _browserDirs.Clear();
-        _browserDirs.AddRange(Library.Subfolders(_browserDir));
+        _browserRows.Clear();
+
+        DirectoryInfo? parent = Directory.GetParent(_browserDir);
+        if (parent is not null)
+            _browserRows.Add(("..", parent.FullName, true));
+
+        foreach (var (name, path) in Library.Subfolders(_browserDir))
+            _browserRows.Add((name, path, false));
+
         _browserDirSel = 0;
         _browserDirFirst = 0;
         _browserFileSel = 0;
@@ -291,8 +301,8 @@ public sealed partial class VisualizerGame : Game
         {
             if (_browserFocusFiles)
                 PlayBrowserFile();
-            else if (_browserDirs.Count > 0)
-                LoadBrowserFolder(_browserDirs[Math.Clamp(_browserDirSel, 0, _browserDirs.Count - 1)].Path);
+            else if (_browserRows.Count > 0)
+                LoadBrowserFolder(_browserRows[Math.Clamp(_browserDirSel, 0, _browserRows.Count - 1)].Path);
 
             return;
         }
@@ -334,6 +344,24 @@ public sealed partial class VisualizerGame : Game
             return;
         }
 
+        foreach (var (rect, path) in _browserCrumbHit)
+        {
+            if (!rect.Contains(p))
+                continue;
+
+            LoadBrowserFolder(path);
+            return;
+        }
+
+        foreach (var (rect, path) in _browserRecentHit)
+        {
+            if (!rect.Contains(p))
+                continue;
+
+            LoadBrowserFolder(path);
+            return;
+        }
+
         foreach (var (rect, index) in _browserDirHit)
         {
             if (!rect.Contains(p))
@@ -341,7 +369,7 @@ public sealed partial class VisualizerGame : Game
 
             _browserFocusFiles = false;
             _browserDirSel = index;
-            LoadBrowserFolder(_browserDirs[index].Path);
+            LoadBrowserFolder(_browserRows[index].Path);
             return;
         }
 
@@ -370,12 +398,12 @@ public sealed partial class VisualizerGame : Game
             return;
         }
 
-        int dirs = _browserDirs.Count;
+        int dirs = _browserRows.Count;
         if (dirs == 0)
             return;
 
         _browserDirSel = Math.Clamp(_browserDirSel + delta, 0, dirs - 1);
-        KeepFirstVisible(ref _browserDirFirst, _browserDirSel, dirs);
+        KeepFirstVisible(ref _browserDirFirst, _browserDirSel, dirs, _browserFolderRows);
     }
 
     private void ScrollBrowser(int delta)
@@ -388,28 +416,29 @@ public sealed partial class VisualizerGame : Game
         }
         else
         {
-            int max = Math.Max(0, _browserDirs.Count - DialogRows);
+            int rows = _browserFolderRows;
+            int max = Math.Max(0, _browserRows.Count - rows);
             _browserDirFirst = Math.Clamp(_browserDirFirst + delta, 0, max);
-            _browserDirSel = Math.Clamp(_browserDirSel, _browserDirFirst, _browserDirFirst + DialogRows - 1);
+            _browserDirSel = Math.Clamp(_browserDirSel, _browserDirFirst, _browserDirFirst + rows - 1);
         }
     }
 
     private void ScrollBrowserIntoView()
     {
         if (_browserFocusFiles)
-            KeepFirstVisible(ref _browserFileFirst, _browserFileSel, _browserFiles.Count);
+            KeepFirstVisible(ref _browserFileFirst, _browserFileSel, _browserFiles.Count, DialogRows);
         else
-            KeepFirstVisible(ref _browserDirFirst, _browserDirSel, _browserDirs.Count);
+            KeepFirstVisible(ref _browserDirFirst, _browserDirSel, _browserRows.Count, _browserFolderRows);
     }
 
-    private static void KeepFirstVisible(ref int first, int selected, int count)
+    private static void KeepFirstVisible(ref int first, int selected, int count, int rows)
     {
         if (selected < first)
             first = selected;
-        else if (selected >= first + DialogRows)
-            first = selected - DialogRows + 1;
+        else if (selected >= first + rows)
+            first = selected - rows + 1;
 
-        first = Math.Clamp(first, 0, Math.Max(0, count - DialogRows));
+        first = Math.Clamp(first, 0, Math.Max(0, count - rows));
     }
 
     private void HandleProfileDialogInput()
@@ -475,47 +504,105 @@ public sealed partial class VisualizerGame : Game
         _browserCloseHit = new Rectangle(dx + dw - 24, dy + 4, 16, 16);
         DrawButton(_browserCloseHit, "X", false, Warn);
 
-        // Path + up button.
+        // Path breadcrumb + up button. Every segment is clickable.
         _browserUpHit = new Rectangle(dx + 12, dy + 30, 24, 16);
         DrawButton(_browserUpHit, "<", false, Accent);
-
-        string path = _browserDir.ToUpperInvariant();
-        int pathRoom = (dw - 60) / 6;
-        if (path.Length > pathRoom)
-            path = "…" + path[^(pathRoom - 1)..];
-        Text(path, dx + 44, dy + 33, TextColor);
+        DrawBreadcrumb(dx + 44, dy + 30, dw - 70);
 
         int listTop = dy + 60;
         int listH = dh - 60 - 56;
         int leftX = dx + 12, leftW = 280;
         int rightX = dx + 304, rightW = dw - 316;
 
-        Text("FOLDERS", leftX + 4, listTop - 12, _browserFocusFiles ? Dim : Accent);
-        Text("*.VGM", rightX + 4, listTop - 12, _browserFocusFiles ? Accent : Dim);
+        // Recent folders get a fixed block at the bottom of the left pane (current folder excluded).
+        var recents = new List<string>();
+        foreach (string recent in _settings.RecentFolders)
+        {
+            if (recents.Count >= 4)
+                break;
 
-        Rect(leftX, listTop, 1, listH, Grid);
+            if (string.Equals(recent, _browserDir, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            recents.Add(recent);
+        }
+
+        int recentRows = recents.Count;
+        int recentH = recentRows > 0 ? recentRows * 18 + 26 : 0;
+        int folderH = listH - recentH;
+        int folderRows = Math.Max(3, folderH / 18);
+        _browserFolderRows = folderRows;
+
+        int subFolders = 0;
+        foreach (var row in _browserRows)
+            if (!row.Parent)
+                subFolders++;
+
+        _browserDirFirst = Math.Clamp(_browserDirFirst, 0, Math.Max(0, _browserRows.Count - folderRows));
+
+        Text("FOLDERS", leftX + 4, listTop - 12, _browserFocusFiles ? Dim : Accent);
+        Text($"*.VGM ({_browserFiles.Count})", rightX + 4, listTop - 12, _browserFocusFiles ? Accent : Dim);
+
+        Rect(leftX, listTop, 1, folderH, Grid);
         Rect(rightX - 12, listTop, 1, listH, Grid);
 
-        // Folders.
+        // Folders (".." first).
         _browserDirHit.Clear();
-        for (int i = 0; i < DialogRows && _browserDirFirst + i < _browserDirs.Count; i++)
+        for (int i = 0; i < folderRows && _browserDirFirst + i < _browserRows.Count; i++)
         {
             int index = _browserDirFirst + i;
             int rowY = listTop + i * 18;
             bool active = index == _browserDirSel;
+            var row = _browserRows[index];
 
             if (active)
                 Rect(leftX + 2, rowY - 3, leftW - 8, 17, PanelHi);
 
-            _browserDirHit.Add((new Rectangle(leftX, rowY - 4, leftW - 4, 18), index));
+            _browserDirHit.Add((new Rectangle(leftX, rowY - 4, leftW - 6, 18), index));
 
-            string name = _browserDirs[index].Name.ToUpperInvariant();
-            if (name.Length > 22) name = name[..22];
+            if (row.Parent)
+            {
+                Text("..", leftX + 8, rowY, active && !_browserFocusFiles ? Accent : Dim);
+                Text("UP", leftX + 32, rowY, Dim);
+                continue;
+            }
+
+            string name = row.Label.ToUpperInvariant();
+            if (name.Length > 20)
+                name = name[..20];
+
             Text(name + "/", leftX + 8, rowY, active && !_browserFocusFiles ? Accent : Dim);
         }
 
-        if (_browserDirs.Count == 0)
-            Text("(NO SUBFOLDERS)", leftX + 8, listTop, Dim);
+        if (subFolders == 0)
+            Text("(NO SUBFOLDERS)", leftX + 8, listTop + (_browserRows.Count > 0 ? 18 : 0), Dim);
+
+        // Recent folders (clickable).
+        _browserRecentHit.Clear();
+        if (recentRows > 0)
+        {
+            int recentTop = listTop + folderH + 6;
+            Rect(leftX, recentTop - 14, leftW - 6, 1, Grid);
+            Text("RECENT", leftX + 4, recentTop - 10, Dim);
+
+            for (int i = 0; i < recentRows; i++)
+            {
+                string path = recents[i];
+                int rowY = recentTop + i * 18;
+
+                _browserRecentHit.Add((new Rectangle(leftX, rowY - 4, leftW - 6, 18), path));
+
+                string label = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
+                if (string.IsNullOrEmpty(label))
+                    label = path;
+
+                label = label.ToUpperInvariant();
+                if (label.Length > 22)
+                    label = label[..22];
+
+                Text(label, leftX + 8, rowY, TextColor);
+            }
+        }
 
         // Files (or scan progress).
         _browserFileHit.Clear();
@@ -574,7 +661,7 @@ public sealed partial class VisualizerGame : Game
 
         string status = _browserScanning
             ? $"SCANNING… {_browserFound}"
-            : $"{_browserFiles.Count} FILE(S)   {_browserDirs.Count} FOLDER(S)";
+            : $"{_browserFiles.Count} FILE(S)   {subFolders} FOLDER(S)";
         Text(status, dx + 260, barY + 18, Dim);
 
         _browserCancelHit = new Rectangle(dx + dw - 92, barY + 12, 76, 18);
@@ -584,6 +671,97 @@ public sealed partial class VisualizerGame : Game
         DrawButton(_browserPlayHit, "PLAY", true, Accent);
 
         Text("ENTER PLAYS · BACKSPACE UP · F5 RESCAN", dx + 12, barY + 34, Dim);
+    }
+
+    /// <summary>
+    /// Clickable breadcrumb for the current folder. The last segment is highlighted; when the path
+    /// does not fit, the middle is collapsed into "…" and the tail is kept clickable.
+    /// </summary>
+    private void DrawBreadcrumb(int x, int y, int maxWidth)
+    {
+        _browserCrumbHit.Clear();
+
+        var segments = new List<(string Label, string Path)>();
+
+        string root = Path.GetPathRoot(_browserDir) ?? string.Empty;
+        string rootLabel = root.TrimEnd(Path.DirectorySeparatorChar).ToUpperInvariant();
+        if (rootLabel.Length == 0)
+            rootLabel = root.ToUpperInvariant();
+
+        segments.Add((rootLabel, root.Length > 0 ? root : _browserDir));
+
+        string rest = root.Length > 0 ? _browserDir[root.Length..] : _browserDir;
+        string accumulated = root;
+
+        foreach (string part in rest.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            accumulated = Path.Combine(accumulated, part);
+            segments.Add((part.ToUpperInvariant(), accumulated));
+        }
+
+        int WidthOf(string label) => PixelFont.Measure(label) + 12;
+        const int separator = 10;
+
+        int total = 0;
+        foreach (var segment in segments)
+            total += WidthOf(segment.Label) + separator;
+
+        var shown = new List<(string Label, string Path)>();
+
+        if (total <= maxWidth)
+        {
+            shown.AddRange(segments);
+        }
+        else
+        {
+            shown.Add(segments[0]);
+
+            int budget = maxWidth - WidthOf(segments[0].Label) - separator - 26;
+            var tail = new List<(string, string)>();
+            int used = 0;
+
+            for (int i = segments.Count - 1; i >= 1; i--)
+            {
+                int w = WidthOf(segments[i].Label) + separator;
+                if (used + w > budget)
+                    break;
+
+                used += w;
+                tail.Insert(0, segments[i]);
+            }
+
+            shown.Add(("…", string.Empty));
+            shown.AddRange(tail);
+        }
+
+        int cx = x;
+
+        for (int i = 0; i < shown.Count; i++)
+        {
+            var (label, path) = shown[i];
+            int width = WidthOf(label);
+
+            if (i > 0)
+            {
+                Text(">", cx + 2, y + 5, Dim);
+                cx += separator;
+            }
+
+            bool current = i == shown.Count - 1;
+            var rect = new Rectangle(cx, y, width, 16);
+
+            if (path.Length > 0)
+            {
+                DrawButton(rect, label, current, Accent);
+                _browserCrumbHit.Add((rect, path));
+            }
+            else
+            {
+                Text(label, cx + 6, y + 5, Dim);
+            }
+
+            cx += width;
+        }
     }
 
     private void DrawProfileDialog()

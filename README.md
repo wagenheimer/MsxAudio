@@ -107,10 +107,11 @@ another backend (SDL, NAudio, a custom mixer, the visualizer…).
 
 `tools/MsxAudioVisualizer` opens a **VGM** (file, folder or *drag & drop*), plays it in real time and
 shows everything the chips are doing. **F2** (or the `OPEN` button in the playlist) opens an in-app
-folder browser with a **recursive** option, so you can browse a whole collection without leaving the
-player; the last folder, view, profile and window size are remembered between runs
-(`%APPDATA%\MsxAudio\visualizer.json`, or a `visualizer.json` next to the executable for a portable
-install).
+folder browser with a **clickable breadcrumb** (each segment jumps to that level, long paths collapse
+the middle), a `..` row, **recent folders** and a **recursive** option, so you can browse a whole
+collection without leaving the player; the last folder, view, profile and window size are remembered
+between runs (`%APPDATA%\MsxAudio\visualizer.json`, or a `visualizer.json` next to the executable for
+a portable install).
 
 | Key | Action |
 | :--- | :--- |
