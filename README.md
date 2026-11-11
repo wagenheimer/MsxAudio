@@ -142,10 +142,11 @@ What you see:
   colour per channel, and a short tail on every note so fast arpeggios stay **stacked as chords**;
   muted/soloed channels draw dimmed;
 - **PIANO** with three octaves: the bars under each key show which **notes the song is playing** right
-  now (one colour per channel), and clicking a key auditions that instrument — the same PSG envelope/
-  noise and SCC wave the song uses, mixed over the music. The note lasts as long as the mouse button
-  is held. **Mute/solo also apply here**: a muted channel (or one filtered out by solo) stops lighting
-  its keys and fades its selector, so the keyboard shows exactly what is being heard;
+  now (one colour per channel, **stacked** when two channels play the same note), and clicking a key
+  auditions that instrument — the same PSG envelope/ noise and SCC wave the song uses, mixed over the
+  music. The note lasts as long as the mouse button is held. **Mute/solo also apply here**: a muted
+  channel (or one filtered out by solo) stops lighting its keys and fades its selector, so the
+  keyboard shows exactly what is being heard;
 - the **MASTER** oscilloscope and the per-channel scopes draw a **min/max envelope** per pixel column,
   so peaks stay visible instead of being averaged away;
 - one strip per channel with live oscilloscope, volume, level with **peak hold**, frequency, nearest

@@ -1520,18 +1520,18 @@ public sealed class VisualizerGame : Game
             Rect(rect, fill);
         }
 
-        // Octave labels on the white C keys.
+        // Octave labels on the white C keys, near the top (the bottom is used by the note bands).
         for (int midi = _pianoBaseMidi; midi < _pianoBaseMidi + 36; midi += 12)
         {
             var rect = _pianoKeyRect[midi];
             if (rect.IsEmpty)
                 continue;
 
-            Text("C" + (midi / 12 - 1), rect.X + (rect.Width - 12) / 2, rect.Bottom - 26, new Color(70, 82, 96));
+            Text("C" + (midi / 12 - 1), rect.X + (rect.Width - 12) / 2, rect.Y + 8, new Color(70, 82, 96));
         }
 
-        // Song notes: a translucent wash over the whole key plus one solid band per channel, so the
-        // lit keys are readable from across the room (the old 4 px bars were too subtle).
+        // Song notes: one solid band per channel, stacked from the bottom of the key. Nothing is
+        // mixed: when two channels play the same note, both bands appear (one above the other).
         for (int midi = _pianoBaseMidi; midi < _pianoBaseMidi + 36; midi++)
         {
             int mask = _keyLit[midi];
@@ -1542,19 +1542,12 @@ public sealed class VisualizerGame : Game
             if (rect.IsEmpty)
                 continue;
 
-            int first = 0;
-            while (first < 8 && (mask & (1 << first)) == 0)
-                first++;
-
-            var wash = ChannelColors[first] * 0.45f;
-            Rect(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2, wash);
-
             int bands = 0;
             for (int ch = 0; ch < 8; ch++)
                 if ((mask & (1 << ch)) != 0)
                     bands++;
 
-            int bandH = bands > 1 ? 7 : 12;
+            int bandH = bands > 1 ? 9 : 16;
             int band = 0;
 
             for (int ch = 0; ch < 8; ch++)
@@ -1562,10 +1555,12 @@ public sealed class VisualizerGame : Game
                 if ((mask & (1 << ch)) == 0)
                     continue;
 
-                int by = rect.Bottom - 2 - bandH - band * (bandH + 1);
-                Rect(rect.X + 2, by, rect.Width - 4, bandH, ChannelColors[ch]);
+                int by = rect.Bottom - 3 - bandH - band * (bandH + 1);
+                var color = ChannelColors[ch];
 
-                // Dark outline keeps the band readable even on a white key.
+                Rect(rect.X + 2, by, rect.Width - 4, bandH, color);
+
+                // Dark line on top of each band: keeps the stack readable on a white key.
                 Rect(rect.X + 2, by, rect.Width - 4, 1, Background);
                 band++;
             }
