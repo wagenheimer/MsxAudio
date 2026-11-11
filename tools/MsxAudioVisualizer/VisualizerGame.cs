@@ -1550,7 +1550,7 @@ public sealed class VisualizerGame : Game
         DrawButton(_pianoOctUpHit, ">", false, Accent);
         Text($"OCT {_pianoBaseMidi / 12 - 1}", navX + 52, rowY + 5, Dim);
 
-        int kx = x + 12, ky = y + 50, kw = w - 24, kh = h - 64;
+        int kx = x + 12, ky = y + 46, kw = w - 24, kh = h - 46 - 40;
         const int whiteCount = 21;                 // 3 octaves
         int whiteW = kw / whiteCount;
 
@@ -1667,20 +1667,57 @@ public sealed class VisualizerGame : Game
             }
         }
 
+        // Info strip: labelled fields inside a panel of its own, so nothing touches the border.
         var target = player.Channels[_pianoChannel];
         int targetNote = target.Key && target.Frequency >= 20 ? MidiOf(target.Frequency) : -1;
-        string playing = targetNote >= 0 ? NoteName(target.Frequency) : "---";
+        string note = targetNote >= 0 ? NoteName(target.Frequency) : "--";
         bool audibleTarget = IsAudible(_pianoChannel);
+        var channelColor = audibleTarget ? ChannelColors[_pianoChannel] : Dim;
 
-        string state = audibleTarget ? "" : "  MUTED / SOLOED OUT";
+        int infoY = ky + kh + 12;
+        Rect(x + 12, infoY - 6, w - 24, 24, PanelHi);
+        Rect(x + 12, infoY - 6, 3, 24, channelColor);
+
+        int fx = x + 24;
+        fx = DrawField(fx, infoY, "CHANNEL", ChannelName(_pianoChannel), channelColor);
+        fx = DrawField(fx, infoY, "NOTE", note, target.Key ? TextColor : Dim);
+        fx = DrawField(fx, infoY, "VOL", $"{target.Volume * 100:0}%", TextColor);
+        fx = DrawField(fx, infoY, "OCT", (_pianoBaseMidi / 12 - 1).ToString(), TextColor);
+        DrawField(fx, infoY, "INSTRUMENT",
+            _pianoChannel < 3 ? "PSG ENVELOPE + NOISE" : "SCC WAVE RAM", TextColor);
+
+        // Whatever is stopping the channel from being heard, and where its note is, on the right.
+        string status = "";
+        if (_player.ChannelMuted[_pianoChannel])
+            status = "MUTED";
+        else if (_pianoChannel < 3 ? !_player.PsgEnabled : !_player.SccEnabled)
+            status = "CHIP OFF";
+        else if (_player.SoloChannel is int solo && solo != _pianoChannel)
+            status = "SOLOED OUT";
+
         if (targetNote >= 0 && targetNote < _pianoBaseMidi)
-            state += "  NOTE BELOW - USE '<'";
+            status = Append(status, "NOTE BELOW - CLICK '<'");
         else if (targetNote > _pianoBaseMidi + 35)
-            state += "  NOTE ABOVE - USE '>'";
+            status = Append(status, "NOTE ABOVE - CLICK '>'");
 
-        Text($"{ChannelName(_pianoChannel)}  {playing}  VOL {target.Volume * 100:0}%  " +
-             $"OCT {_pianoBaseMidi / 12 - 1}  ({(_pianoChannel < 3 ? "PSG" : "SCC")} INSTRUMENT){state}",
-            x + 12, ky + kh + 6, !audibleTarget ? Warn : state.Length > 0 ? Accent : Dim);
+        if (status.Length > 0)
+        {
+            int sw = PixelFont.Measure(status);
+            Text(status, x + w - 26 - sw, infoY, status.Contains("MUTED") || status.Contains("OFF") || status.Contains("SOLOED") ? Warn : Accent);
+        }
+    }
+
+    private static string Append(string left, string right) => left.Length == 0 ? right : left + "   " + right;
+
+    /// <summary>Draws "<c>LABEL value</c>" and returns the x where the next field starts.</summary>
+    private int DrawField(int x, int y, string label, string value, Color valueColor)
+    {
+        Text(label, x, y, Dim);
+
+        int valueX = x + PixelFont.Measure(label) + 6;
+        Text(value, valueX, y, valueColor);
+
+        return valueX + PixelFont.Measure(value) + 22;
     }
 
     /// <summary>Index (0-based) of the white key that starts before <paramref name="midi"/>.</summary>
