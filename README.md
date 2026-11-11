@@ -220,6 +220,11 @@ dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
 # screenshot for docs/CI
 MSXAUDIO_SHOT=shot.png MSXAUDIO_SHOT_FRAME=200 dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
 
+# screenshot of the extraction dialog, pre-filled and (with MSXAUDIO_EXTRACT) already running
+MSXAUDIO_DIALOG=extract MSXAUDIO_ROM=game.rom MSXAUDIO_ROM_KEYS=START@1 \
+  MSXAUDIO_ROM_SECONDS=20 MSXAUDIO_EXTRACT=1 \
+  MSXAUDIO_SHOT=extract.png MSXAUDIO_SHOT_FRAME=200 dotnet run --project tools/MsxAudioVisualizer
+
 # record a GIF with the built-in encoder (no ffmpeg needed), 640×360 — GIF is silent by format
 MSXScope music/stage_a.vgm --record out.gif --seconds 10 --fps 15
 
