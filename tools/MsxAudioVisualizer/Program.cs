@@ -33,6 +33,7 @@ public static class Program
         int fps = 30;
         int width = 1280;
         int height = 720;
+        bool roll = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -56,6 +57,9 @@ public static class Program
                     break;
                 case "--height":
                     if (i + 1 < args.Length && int.TryParse(args[++i], out int ih)) height = ih;
+                    break;
+                case "--roll":
+                    roll = true;
                     break;
                 case "--profile":
                     if (i + 1 < args.Length) profileName = args[++i];
@@ -91,7 +95,7 @@ public static class Program
 
         Directory.SetCurrentDirectory(dir);
 
-        using var game = new VisualizerGame(file, record, seconds, fps, width, height, AudioProfile.ByName(profileName));
+        using var game = new VisualizerGame(file, record, seconds, fps, width, height, AudioProfile.ByName(profileName), roll);
         game.Run();
     }
 

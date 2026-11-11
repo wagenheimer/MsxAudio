@@ -119,6 +119,7 @@ shows everything the chips are doing.
 | `4 5 6 7 8` | SCC channels 1..5 |
 | `O` | mixing profile (`original` / `stereo` / `remaster`) |
 | `L` | auto-next |
+| `Tab` | switch **spectrum** ↔ **piano roll** |
 | `R` | restart |
 | `H` | help overlay |
 | `Esc` | quit |
@@ -126,7 +127,10 @@ shows everything the chips are doing.
 What you see:
 
 - **POSITION** bar with `current / total`, the loop window and a marker — click or drag to seek;
-- **SPECTRUM** (log-spaced FFT) and the **MASTER** oscilloscope;
+- **SPECTRUM** (log-spaced FFT) or **PIANO ROLL** (`Tab`): the roll scrolls the last 12 s with one
+  colour per channel, pitch on the vertical axis and the octave labels on the right;
+- the **MASTER** oscilloscope and the per-channel scopes draw a **min/max envelope** per pixel column,
+  so peaks stay visible instead of being averaged away;
 - one strip per channel (PSG blue, SCC green) with live oscilloscope, volume, level with **peak
   hold**, frequency, nearest **note**, key state and — for SCC — the **32-sample wave RAM**;
 - **Solo** by clicking a channel label (or its `S` button) and **Mute** through the `M` button.
@@ -153,6 +157,9 @@ MsxAudioVisualizer music/stage_a.vgm --audio-only out.wav --seconds 30 --profile
 
 # window size
 MsxAudioVisualizer music/stage_a.vgm --width 1600 --height 900
+
+# start with the piano roll instead of the spectrum
+MsxAudioVisualizer music/stage_a.vgm --roll
 ```
 
 Recording is **deterministic**: every frame advances exactly `1/fps` seconds of music, independent of
@@ -304,7 +311,7 @@ profiles/                             per-game extraction profiles (JSON)
    hardware cadence (then loop detection works and no external emulator is needed).
 2. A `play` CLI command that streams through `MsxAudioEngine` (live preview).
 3. Optional `SoundEffect`-based player for projects that cannot use `DynamicSoundEffectInstance`.
-4. Per-channel note history (piano roll) and richer spectrum labels in the visualizer.
+4. Per-channel note history in the roll: chords per channel (today the roll shows one line per channel).
 
 ## Tests
 

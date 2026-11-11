@@ -39,7 +39,7 @@ public sealed class VgmPlayer : IDisposable
     private readonly float[][] _channelRing;
     private int _ringPos;
 
-    private readonly float[] _scopeRing = new float[2048];
+    private readonly float[] _scopeRing = new float[4096];
     private int _scopePos;
 
     // Register copies (for the UI; the chips keep their own state).
@@ -89,7 +89,7 @@ public sealed class VgmPlayer : IDisposable
             _sccPan[i] = ((float)Math.Cos((pan + 1) * Math.PI / 4), (float)Math.Sin((pan + 1) * Math.PI / 4));
         }
 
-        _channelRing = Enumerable.Range(0, ChannelCount).Select(_ => new float[192]).ToArray();
+        _channelRing = Enumerable.Range(0, ChannelCount).Select(_ => new float[1024]).ToArray();
 
         Channels = new ChannelInfo[ChannelCount];
         for (int i = 0; i < ChannelCount; i++)

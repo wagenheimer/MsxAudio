@@ -73,6 +73,29 @@ public sealed class VisualizerGame : Game
     private bool _autoNext = true;
     private bool _showHelp;
     private readonly AudioProfile _profile;
+
+    // Piano roll: one event list per channel (only on key / pitch changes).
+    private sealed class NoteEvent
+    {
+        public double Time;
+        public double Frequency;
+        public float Volume;
+        public bool Key;
+    }
+
+    private readonly List<NoteEvent>[] _notes =
+        Enumerable.Range(0, 8).Select(_ => new List<NoteEvent>()).ToArray();
+
+    private readonly int[] _lastMidi = Enumerable.Repeat(-1, 8).ToArray();
+    private bool _showRoll;
+    private const double RollSeconds = 12.0;
+
+    private static readonly Color[] ChannelColors =
+    {
+        new(79, 195, 247), new(41, 182, 246), new(129, 212, 250),
+        new(126, 240, 130), new(76, 217, 100), new(0, 200, 83),
+        new(168, 230, 163), new(0, 150, 136),
+    };
     private string _status = string.Empty;
     private float _statusTimer;
 
@@ -102,9 +125,10 @@ public sealed class VisualizerGame : Game
     private int _gifWidth, _gifHeight, _gifFactor = 1;
 
     public VisualizerGame(string? file, string? recordPath = null, int recordSeconds = 10, int recordFps = 30,
-        int windowWidth = VW, int windowHeight = VH, AudioProfile? profile = null)
+        int windowWidth = VW, int windowHeight = VH, AudioProfile? profile = null, bool startRoll = false)
     {
         _profile = profile ?? AudioProfile.Stereo;
+        _showRoll = startRoll;
         _graphics = new GraphicsDeviceManager(this)
         {
             PreferredBackBufferWidth = Math.Max(640, windowWidth),
@@ -257,6 +281,7 @@ public sealed class VisualizerGame : Game
 
             Console.WriteLine($"[Visualizer] loaded {path} events={vgm.Events.Count} len={vgm.TotalSeconds:0.0}s");
             _status = "LOADED " + Path.GetFileName(path);
+            ClearNotes();
             _statusTimer = 3f;
             Array.Clear(_bars);
             Array.Clear(_peakHold);
@@ -295,7 +320,54 @@ public sealed class VisualizerGame : Game
         }
 
         UpdateSpectrum();
+        UpdateNotes();
         base.Update(gameTime);
+    }
+
+    /// <summary>Records a note event whenever a channel changes key or pitch (for the piano roll).</summary>
+    private void UpdateNotes()
+    {
+        if (_player is null)
+            return;
+
+        double now = _player.Time;
+        for (int ch = 0; ch < 8; ch++)
+        {
+            var info = _player.Channels[ch];
+            int midi = info.Key && info.Frequency >= 20
+                ? (int)Math.Round(69 + 12 * Math.Log2(info.Frequency / 440.0))
+                : -1;
+
+            var list = _notes[ch];
+
+            if (midi == _lastMidi[ch])
+            {
+                if (list.Count > 0)
+                    list[^1].Volume = Math.Max(list[^1].Volume, info.Volume);
+                continue;
+            }
+
+            _lastMidi[ch] = midi;
+            list.Add(new NoteEvent
+            {
+                Time = now,
+                Frequency = info.Frequency,
+                Volume = info.Volume,
+                Key = midi >= 0,
+            });
+
+            while (list.Count > 1 && list[0].Time < now - RollSeconds * 2)
+                list.RemoveAt(0);
+        }
+    }
+
+    private void ClearNotes()
+    {
+        for (int ch = 0; ch < 8; ch++)
+        {
+            _notes[ch].Clear();
+            _lastMidi[ch] = -1;
+        }
     }
 
     private void UpdateMeters(float dt)
@@ -348,6 +420,13 @@ public sealed class VisualizerGame : Game
         if (Pressed(Keys.H))
             _showHelp = !_showHelp;
 
+        if (Pressed(Keys.Tab))
+        {
+            _showRoll = !_showRoll;
+            _status = _showRoll ? "PIANO ROLL" : "SPECTRUM";
+            _statusTimer = 2f;
+        }
+
         if (Pressed(Keys.Up) && _tracks.Count > 0)
         {
             _selected = (_selected - 1 + _tracks.Count) % _tracks.Count;
@@ -372,18 +451,21 @@ public sealed class VisualizerGame : Game
         if (Pressed(Keys.R) && _player is not null)
         {
             _player.Restart();
+            ClearNotes();
             FlushAudio();
         }
 
         if (Pressed(Keys.Left) && _player is not null)
         {
             _player.Seek(Math.Max(0, _player.Time - 5));
+            ClearNotes();
             FlushAudio();
         }
 
         if (Pressed(Keys.Right) && _player is not null)
         {
             _player.Seek(Math.Min(_player.TotalSeconds, _player.Time + 5));
+            ClearNotes();
             FlushAudio();
         }
 
@@ -441,6 +523,7 @@ public sealed class VisualizerGame : Game
         {
             double t = (p.X - _seekBar.Left) / (double)_seekBar.Width * _player.TotalSeconds;
             _player.Seek(Math.Clamp(t, 0, _player.TotalSeconds));
+            if (pressed) ClearNotes();
             if (pressed) FlushAudio();
             return;
         }
@@ -493,6 +576,7 @@ public sealed class VisualizerGame : Game
         _player.Dispose();
         _player = new VgmPlayer(vgm, loop: true, sampleRate: 48000, oversample: next.Oversample, profile: next);
         _player.Seek(time);
+        ClearNotes();
         FlushAudio();
 
         _status = "PROFILE: " + next.Name.ToUpperInvariant();
@@ -555,7 +639,10 @@ public sealed class VisualizerGame : Game
 
         if (_player is not null)
         {
-            DrawSpectrum();
+            if (_showRoll)
+                DrawRoll();
+            else
+                DrawSpectrum();
             DrawScope();
             DrawChannels();
         }
@@ -750,8 +837,70 @@ public sealed class VisualizerGame : Game
         }
     }
 
-    private void DrawScope()
+    /// <summary>Scrolling piano roll: time to the right, pitch up, one colour per channel.</summary>
+    private void DrawRoll()
     {
+        const int x = 336, y = 104, w = VW - 348, h = 182;
+        Panel(x, y, w, h);
+        Text("PIANO ROLL", x + 10, y + 6, Accent);
+        Text("TAB: SPECTRUM", x + 120, y + 6, Dim);
+
+        int left = x + 10, top = y + 22, innerW = w - 20, innerH = h - 32;
+        const int lowMidi = 21, highMidi = 108;
+
+        int PitchY(int midi) => top + innerH - (midi - lowMidi) * innerH / (highMidi - lowMidi);
+
+        // Octave lines (C2..C8).
+        for (int midi = 24; midi <= highMidi; midi += 12)
+        {
+            int py = PitchY(midi);
+            if (py < top) break;
+            Rect(left, py, innerW, 1, Grid);
+            Text(Notes[midi % 12] + (midi / 12 - 1), x + w - 26, py - 3, Dim);
+        }
+
+        if (_player is null)
+            return;
+
+        double now = _player.Time;
+
+        for (int ch = 0; ch < 8; ch++)
+        {
+            var color = ChannelColors[ch];
+            var list = _notes[ch];
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                var e = list[i];
+                if (!e.Key || e.Frequency < 20)
+                    continue;
+
+                double t0 = e.Time;
+                double t1 = i + 1 < list.Count ? list[i + 1].Time : now;
+                if (t1 <= t0)
+                    continue;
+
+                int midi = (int)Math.Round(69 + 12 * Math.Log2(e.Frequency / 440.0));
+                int py = PitchY(Math.Clamp(midi, lowMidi, highMidi));
+
+                int px0 = left + (int)(innerW * (1 - (now - t0) / RollSeconds));
+                int px1 = left + (int)(innerW * (1 - (now - t1) / RollSeconds));
+                if (px1 < left || px0 > left + innerW)
+                    continue;
+
+                px0 = Math.Clamp(px0, left, left + innerW - 1);
+                px1 = Math.Clamp(px1, left, left + innerW);
+
+                int thickness = 2 + (int)Math.Round(Math.Clamp(e.Volume, 0f, 1f) * 3f);
+                Rect(px0, py, Math.Max(1, px1 - px0), thickness, color);
+            }
+        }
+
+        // "Now" line at the right edge.
+        Rect(left + innerW - 1, top, 1, innerH, Accent);
+    }
+
+    private void DrawScope()    {
         const int x = 336, y = 292, w = VW - 348, h = 138;
         Panel(x, y, w, h);
         Text("MASTER", x + 10, y + 6, Accent);
@@ -761,19 +910,48 @@ public sealed class VisualizerGame : Game
 
         var scope = _player!.Scope;
         int pos = _player.ScopePos;
-        int points = Math.Min(innerW, scope.Length);
+        int n = scope.Length;
 
-        int prevY = -1;
-        for (int i = 0; i < points; i++)
+        // Trigger on an upward zero crossing so the waveform does not jitter frame to frame.
+        int trig = 0;
+        for (int i = 0; i < n / 2; i++)
         {
-            float sample = scope[(pos + scope.Length - points + i) % scope.Length];
-            int py = top + innerH / 2 - (int)(sample * innerH * 3.0f);
-            py = Math.Clamp(py, top, top + innerH - 1);
+            float a = scope[(pos + i) % n];
+            float b = scope[(pos + i + 1) % n];
+            if (a < 0 && b >= 0)
+            {
+                trig = i;
+                break;
+            }
+        }
 
-            if (prevY >= 0)
-                Rect(left + i, Math.Min(prevY, py), 1, Math.Max(1, Math.Abs(py - prevY)), PsgColor);
+        int available = n - trig - 1;
+        if (available < innerW)
+            available = n - trig;
 
-            prevY = py;
+        // Min/max envelope per column (keeps the peaks instead of averaging them away).
+        for (int col = 0; col < innerW; col++)
+        {
+            int i0 = trig + col * available / innerW;
+            int i1 = trig + (col + 1) * available / innerW;
+            if (i1 <= i0) i1 = i0 + 1;
+
+            float min = 1f, max = -1f;
+            for (int i = i0; i < i1 && i < n; i++)
+            {
+                float v = scope[(pos + i) % n];
+                if (v < min) min = v;
+                if (v > max) max = v;
+            }
+
+            int y0 = top + innerH / 2 - (int)(max * innerH * 1.7f);
+            int y1 = top + innerH / 2 - (int)(min * innerH * 1.7f);
+            y0 = Math.Clamp(y0, top, top + innerH - 1);
+            y1 = Math.Clamp(y1, top, top + innerH - 1);
+
+            int topY = Math.Min(y0, y1);
+            int height = Math.Max(1, Math.Abs(y1 - y0));
+            Rect(left + col, topY, 1, height, PsgColor);
         }
     }
 
@@ -815,23 +993,35 @@ public sealed class VisualizerGame : Game
             DrawButton(soloRect, "S", soloed, Accent);
             DrawButton(muteRect, "M", muted, Warn);
 
-            // Live mini scope.
+            // Live mini scope (min/max envelope per column).
             int scopeX = sx + 8, scopeY = stripY + 24, scopeW = stripW - 16, scopeH = 46;
             Rect(scopeX, scopeY + scopeH / 2, scopeW, 1, Grid);
 
             var ring = _player.ChannelScope(ch);
             int ringPos = _player.ChannelScopePos;
-            int points = Math.Min(scopeW, ring.Length);
-            int prevY = -1;
+            int ringLen = ring.Length;
 
-            for (int i = 0; i < points; i++)
+            int usable = Math.Min(ringLen, scopeW * 8);
+            for (int col = 0; col < scopeW; col++)
             {
-                float sample = ring[(ringPos + ring.Length - points + i) % ring.Length];
-                int py = scopeY + scopeH / 2 - (int)(sample * scopeH * 2.0f);
-                py = Math.Clamp(py, scopeY, scopeY + scopeH - 1);
-                if (prevY >= 0)
-                    Rect(scopeX + i, Math.Min(prevY, py), 1, Math.Max(1, Math.Abs(py - prevY)), color);
-                prevY = py;
+                int i0 = col * usable / scopeW;
+                int i1 = (col + 1) * usable / scopeW;
+                if (i1 <= i0) i1 = i0 + 1;
+
+                float min = 1f, max = -1f;
+                for (int i = i0; i < i1 && i < ringLen; i++)
+                {
+                    float v = ring[(ringPos + ringLen - usable + i) % ringLen];
+                    if (v < min) min = v;
+                    if (v > max) max = v;
+                }
+
+                int y0 = scopeY + scopeH / 2 - (int)(max * scopeH * 1.2f);
+                int y1 = scopeY + scopeH / 2 - (int)(min * scopeH * 1.2f);
+                y0 = Math.Clamp(y0, scopeY, scopeY + scopeH - 1);
+                y1 = Math.Clamp(y1, scopeY, scopeY + scopeH - 1);
+
+                Rect(scopeX + col, Math.Min(y0, y1), 1, Math.Max(1, Math.Abs(y1 - y0)), color);
             }
 
             // SCC wave RAM (32 samples).
@@ -1069,6 +1259,7 @@ public sealed class VisualizerGame : Game
 
         UpdateSpectrum();
         UpdateMeters(1f / _recordFps);
+        UpdateNotes();
     }
 
     private void FinishRecording()
