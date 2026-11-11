@@ -1,0 +1,36 @@
+# Build results
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+build/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userprefs
+*.DotSettings.user
+
+# Test results
+[Tt]est[Rr]esult*/
+*.trx
+coverage*.json
+coverage*.xml
+coverage*.info
+
+# Ferramentas / artefatos locais
+_export/
+*.wav
+!docs/**/*.wav
+*.vgm
+!tests/**/*.vgm

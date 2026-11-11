@@ -1,0 +1,54 @@
+{
+  "name": "King's Valley II",
+  "machine": "C-BIOS_MSX2_JP",
+  "soundCallAddress": 17198,
+  "stopId": 1,
+  "ids": [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+    41, 42, 43, 44, 45, 46, 48, 49, 50, 53, 54, 56, 57, 58, 59, 60, 61, 62, 64, 65,
+    67, 68, 69, 70
+  ],
+  "musicIds": [3, 5, 6, 7, 8, 9, 10, 13, 14, 17, 18],
+  "secondsPerId": 12,
+  "secondsPerSong": 120,
+  "secondsById": {
+    "9": 300,
+    "14": 240,
+    "17": 240,
+    "10": 240
+  },
+  "firstCaptureAt": 23,
+  "navigation": [
+    { "at": 12, "row": 8, "mask": 1 },
+    { "at": 16, "row": 8, "mask": 1 },
+    { "at": 19, "row": 8, "mask": 64 },
+    { "at": 20.5, "row": 8, "mask": 1 }
+  ],
+  "names": {
+    "3": "title",
+    "5": "stage_a",
+    "6": "stage_b",
+    "7": "stage_c",
+    "8": "stage_d",
+    "9": "stage_e",
+    "10": "music_10",
+    "13": "world_map",
+    "14": "ending",
+    "16": "menu_confirm",
+    "17": "menu",
+    "18": "music_18",
+    "19": "jump",
+    "23": "door_enter",
+    "25": "pickup",
+    "28": "knife_fly",
+    "30": "player_appear",
+    "37": "coffin_open",
+    "40": "player_die",
+    "41": "death_jingle",
+    "50": "password_key",
+    "54": "knife_hit",
+    "56": "step_a",
+    "60": "step_b"
+  }
+}

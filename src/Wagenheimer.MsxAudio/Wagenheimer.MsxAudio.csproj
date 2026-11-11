@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageId>Wagenheimer.MsxAudio</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Wagenheimer</Authors>
+    <Company>Green Sauce Games</Company>
+    <Description>MSX audio engine: AY-3-8910 (PSG) + Konami SCC emulation, VGM playback with sample-accurate loops, chip-accurate music/SFX extraction and a .msxaudio library format. Engine-agnostic (no MonoGame dependency).</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/wagenheimer/MsxAudio</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
