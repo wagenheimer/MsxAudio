@@ -81,7 +81,7 @@ public sealed partial class VisualizerGame : Game
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Visualizer] png falhou: {ex.Message}");
+            Console.WriteLine($"[MSXScope] png falhou: {ex.Message}");
         }
     }
 
@@ -142,21 +142,21 @@ public sealed partial class VisualizerGame : Game
         {
             _gif.Save();
             _gif.Dispose();
-            Console.WriteLine($"[Visualizer] GIF written: {_recordPath} ({_recordFrame} frames)");
+            Console.WriteLine($"[MSXScope] GIF written: {_recordPath} ({_recordFrame} frames)");
             Exit();
             return;
         }
 
-        Console.WriteLine($"[Visualizer] {_recordFrame} frames in {_recordDir}");
+        Console.WriteLine($"[MSXScope] {_recordFrame} frames in {_recordDir}");
 
         if (_recordPath is not null && TryEncode(_recordPath))
-            Console.WriteLine($"[Visualizer] recording written: {_recordPath}");
+            Console.WriteLine($"[MSXScope] recording written: {_recordPath}");
         else if (_wavPath is not null)
-            Console.WriteLine($"[Visualizer] ffmpeg not found: frames in {_recordDir} + audio in {_wavPath}\n" +
+            Console.WriteLine($"[MSXScope] ffmpeg not found: frames in {_recordDir} + audio in {_wavPath}\n" +
                               $"              ffmpeg -framerate {_recordFps} -i \"{Path.Combine(_recordDir, "frame_%05d.png")}\" " +
                               $"-i \"{_wavPath}\" -c:v libx264 -pix_fmt yuv420p -crf 20 -c:a aac -b:a 192k -shortest \"{_recordPath}\"");
         else
-            Console.WriteLine("[Visualizer] ffmpeg not found: use the PNG sequence above to build the video");
+            Console.WriteLine("[MSXScope] ffmpeg not found: use the PNG sequence above to build the video");
 
         Exit();
     }

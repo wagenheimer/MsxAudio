@@ -37,8 +37,8 @@ public sealed partial class VisualizerGame : Game
         Rect(0, 0, VW, 46, PanelHi);
         Rect(0, 45, VW, 1, Grid);
 
-        Text("MSX AUDIO VISUALIZER", 16, 12, Accent, 2);
-        Text("PSG AY-3-8910 + KONAMI SCC", 16, 30, Dim);
+        Text("MSX SCOPE", 16, 12, Accent, 2);
+        Text("PLAYER & CHIP ANALYSER - PSG AY-3-8910 + KONAMI SCC", 16, 30, Dim);
 
         var p = _player;
 
@@ -428,7 +428,7 @@ public sealed partial class VisualizerGame : Game
             "WALKS THE AUDIBLE CHANNELS; '<' / '>' CHANGE OCTAVE.",
             "",
             "DROP A .VGM OR A FOLDER INTO THE WINDOW TO LOAD IT",
-            "MSXAUDIOVISUALIZER SONG.VGM --RECORD OUT.GIF --SECONDS 10",
+            "MSXSCOPE SONG.VGM --RECORD OUT.GIF --SECONDS 10",
         };
 
         for (int i = 0; i < lines.Length; i++)

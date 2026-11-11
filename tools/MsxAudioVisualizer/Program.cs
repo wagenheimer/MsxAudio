@@ -6,9 +6,9 @@ using Wagenheimer.MsxAudio.Vgm;
 namespace Wagenheimer.MsxAudio.Visualizer;
 
 /// <summary>
-/// Entry point.
+/// MSXScope — MSX audio player &amp; chip analyser. Entry point.
 /// <code>
-/// MsxAudioVisualizer [file.vgm | folder] [options]
+/// MSXScope [file.vgm | folder] [options]
 ///
 ///   --record  out.gif|out.mp4   record the session (GIF uses the embedded encoder; MP4 muxes the
 ///                               audio WAV through ffmpeg when available)
@@ -17,9 +17,10 @@ namespace Wagenheimer.MsxAudio.Visualizer;
 ///   --width / --height          initial window size
 ///   --profile name              mixing profile (original | stereo | remaster)
 ///   --view name                 start view: spectrum | roll | piano (--roll is kept as an alias)
+///   --recursive                 scan subfolders when a folder is given
 ///   --audio-only out.wav        render the audio only, without opening a window
 /// </code>
-/// With no positional argument it scans the current directory for <c>.vgm</c> files.
+/// With no positional argument it reopens the last folder from the settings file.
 /// </summary>
 public static class Program
 {
@@ -92,7 +93,7 @@ public static class Program
             }
         }
 
-        Console.WriteLine($"[Visualizer] file={file ?? "(none)"} dir={dir} record={record ?? (audioOnly is null ? "(live)" : "(audio only)")}");
+        Console.WriteLine($"[MSXScope] file={file ?? "(none)"} dir={dir} record={record ?? (audioOnly is null ? "(live)" : "(audio only)")}");
 
         // Resolve output paths before the working directory is switched to the song folder, so a
         // relative --record/--audio-only path lands where the command was run.
@@ -105,7 +106,7 @@ public static class Program
         {
             if (file is null)
             {
-                Console.WriteLine("[Visualizer] --audio-only needs a .vgm file");
+                Console.WriteLine("[MSXScope] --audio-only needs a .vgm file");
                 return;
             }
 
@@ -142,11 +143,11 @@ public static class Program
                 remaining -= chunk;
             }
 
-            Console.WriteLine($"[Visualizer] audio written: {wavPath} ({total:0.0}s, {profile.Name})");
+            Console.WriteLine($"[MSXScope] audio written: {wavPath} ({total:0.0}s, {profile.Name})");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Visualizer] audio-only failed: {ex.Message}");
+            Console.WriteLine($"[MSXScope] audio-only failed: {ex.Message}");
         }
     }
 }

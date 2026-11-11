@@ -198,7 +198,7 @@ public sealed partial class VisualizerGame : Game
         Content.RootDirectory = "Content";
         IsMouseVisible = true;
         Window.AllowUserResizing = true;
-        Window.Title = "MSX Audio Visualizer — PSG + SCC";
+        Window.Title = "MSXScope — MSX audio player & chip analyser (PSG AY-3-8910 + Konami SCC)";
 
         _startFile = file;
 
@@ -221,6 +221,9 @@ public sealed partial class VisualizerGame : Game
     protected override void Initialize()
     {
         base.Initialize();
+
+        // Running window icon (the .ico only brands the executable).
+        WindowIcon.TryApply(Window, GraphicsDevice, Path.Combine(AppContext.BaseDirectory, "icon.png"));
 
         Window.FileDrop += (_, e) =>
         {

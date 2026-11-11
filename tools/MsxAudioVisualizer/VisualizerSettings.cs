@@ -58,7 +58,7 @@ public sealed class VisualizerSettings
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Visualizer] settings ignored: {ex.Message}");
+            Console.WriteLine($"[MSXScope] settings ignored: {ex.Message}");
             return new VisualizerSettings();
         }
     }
@@ -79,7 +79,7 @@ public sealed class VisualizerSettings
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Visualizer] settings not saved: {ex.Message}");
+            Console.WriteLine($"[MSXScope] settings not saved: {ex.Message}");
         }
     }
 

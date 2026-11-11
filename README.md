@@ -1,7 +1,13 @@
 # Wagenheimer.MsxAudio
 
+<img src="docs/media/icon.png" alt="MSXScope" width="112" align="right">
+
 **MSX audio for .NET** — AY-3-8910 (PSG) and Konami SCC emulation, VGM playback/recording, ROM music
 extraction and a game-ready streaming engine with its own `.msxaudio` library format.
+
+**MSXScope** — the visual player included in the repo: VGM playback with per-channel PSG/SCC strips,
+spectrum in dB, piano roll with a whole-song map, a playable piano that auditions the song's own
+instruments, and GIF/MP4 export.
 
 [![NuGet](https://img.shields.io/nuget/v/Wagenheimer.MsxAudio?logo=nuget&label=Wagenheimer.MsxAudio)](https://www.nuget.org/packages/Wagenheimer.MsxAudio)
 [![NuGet](https://img.shields.io/nuget/v/Wagenheimer.MsxAudio.MonoGame?logo=nuget&label=Wagenheimer.MsxAudio.MonoGame)](https://www.nuget.org/packages/Wagenheimer.MsxAudio.MonoGame)
@@ -15,7 +21,7 @@ dotnet add package Wagenheimer.MsxAudio            # engine-agnostic core (pure 
 dotnet add package Wagenheimer.MsxAudio.MonoGame  # optional MonoGame bridge
 ```
 
-<p align="center"><img src="docs/media/visualizer.gif" alt="MSX Audio Visualizer playing a VGM" width="900"></p>
+<p align="center"><img src="docs/media/visualizer.gif" alt="MSXScope playing a VGM" width="900"></p>
 
 ---
 
@@ -25,7 +31,7 @@ dotnet add package Wagenheimer.MsxAudio.MonoGame  # optional MonoGame bridge
 - [The chips](#the-chips)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
-- [Visual player (MonoGame)](#visual-player-monogame)
+- [MSXScope (visual player)](#msxscope-visual-player)
 - [The `.msxaudio` format](#the-msxaudio-format)
 - [Playback engine](#playback-engine)
 - [Extracting music from a ROM](#extracting-music-from-a-rom)
@@ -103,9 +109,9 @@ player.Update();                           // keeps the buffer queue full
 `Render(float[] destination, int frames)` also gives you **interleaved stereo** if you want to feed
 another backend (SDL, NAudio, a custom mixer, the visualizer…).
 
-## Visual player (MonoGame)
+## MSXScope (visual player)
 
-`tools/MsxAudioVisualizer` opens a **VGM** (file, folder or *drag & drop*), plays it in real time and
+**MSXScope** (`tools/MsxAudioVisualizer`) opens a **VGM** (file, folder or *drag & drop*), plays it in real time and
 shows everything the chips are doing. **F2** (or the `OPEN` button in the playlist) opens an in-app
 folder browser with a **clickable breadcrumb** (each segment jumps to that level, long paths collapse
 the middle), a `..` row, **recent folders** and a **recursive** option, so you can browse a whole
@@ -181,26 +187,26 @@ dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
 MSXAUDIO_SHOT=shot.png MSXAUDIO_SHOT_FRAME=200 dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
 
 # record a GIF with the built-in encoder (no ffmpeg needed), 640×360 — GIF is silent by format
-MsxAudioVisualizer music/stage_a.vgm --record out.gif --seconds 10 --fps 15
+MSXScope music/stage_a.vgm --record out.gif --seconds 10 --fps 15
 
 # record an MP4 **with audio**: the same samples that are heard go to out.wav and ffmpeg muxes
 # frames + WAV (without ffmpeg the frames and the WAV are kept and the exact command is printed)
-MsxAudioVisualizer music/stage_a.vgm --record out.mp4 --seconds 20 --fps 30
+MSXScope music/stage_a.vgm --record out.mp4 --seconds 20 --fps 30
 
 # audio only (no window): renders the segment to a WAV using the same chips/profile
-MsxAudioVisualizer music/stage_a.vgm --audio-only out.wav --seconds 30 --profile remaster
+MSXScope music/stage_a.vgm --audio-only out.wav --seconds 30 --profile remaster
 
 # window size
-MsxAudioVisualizer music/stage_a.vgm --width 1600 --height 900
+MSXScope music/stage_a.vgm --width 1600 --height 900
 
 # start with the piano roll instead of the spectrum
-MsxAudioVisualizer music/stage_a.vgm --roll
+MSXScope music/stage_a.vgm --roll
 
 # start on the playable piano
-MsxAudioVisualizer music/stage_a.vgm --view piano
+MSXScope music/stage_a.vgm --view piano
 
 # open a collection (all .vgm below the folder)
-MsxAudioVisualizer "C:\music\msx" --recursive
+MSXScope "C:\music\msx" --recursive
 ```
 
 Recording is **deterministic**: every frame advances exactly `1/fps` seconds of music, independent of
@@ -330,7 +336,7 @@ src/Wagenheimer.MsxAudio/             core (pure C#, no engine dependency)
   Extraction/  VgmImporter, OpenMsxRomExtractor, DirectRomExtractor (+ profiles)
 src/Wagenheimer.MsxAudio.MonoGame/    MsxAudioPlayer (DynamicSoundEffectInstance)
 tools/MsxAudioTool/                   extractor/import/export CLI
-tools/MsxAudioVisualizer/             MonoGame visual player (PSG/SCC per channel, GIF export)
+tools/MsxAudioVisualizer/             MSXScope: MonoGame visual player (PSG/SCC, GIF/MP4 export)
 tests/Wagenheimer.MsxAudio.Tests/     chips, VGM, package, engine, MSX machine
 profiles/                             per-game extraction profiles (JSON)
 ```

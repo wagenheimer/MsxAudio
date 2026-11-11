@@ -211,7 +211,7 @@ public sealed partial class VisualizerGame : Game
                     _listSelectPath = path;
             }
 
-            Console.WriteLine($"[Visualizer] loaded {path} events={vgm.Events.Count} len={vgm.TotalSeconds:0.0}s");
+            Console.WriteLine($"[MSXScope] loaded {path} events={vgm.Events.Count} len={vgm.TotalSeconds:0.0}s");
             _status = "LOADED " + Path.GetFileName(path);
             ClearNotes();
             _statusTimer = 3f;
@@ -221,7 +221,7 @@ public sealed partial class VisualizerGame : Game
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Visualizer] erro: {ex}");
+            Console.WriteLine($"[MSXScope] erro: {ex}");
             _status = "ERROR: " + ex.Message;
             _statusTimer = 6f;
         }

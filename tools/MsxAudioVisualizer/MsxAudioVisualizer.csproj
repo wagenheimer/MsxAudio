@@ -7,11 +7,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>MsxAudioVisualizer</AssemblyName>
+    <AssemblyName>MSXScope</AssemblyName>
     <RootNamespace>Wagenheimer.MsxAudio.Visualizer</RootNamespace>
-    <ApplicationIcon />
-    <Description>Visual VGM player for the Wagenheimer.MsxAudio package (PSG + SCC, per-channel view).</Description>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+    <Description>MSXScope - VGM player and chip analyser for the Wagenheimer.MsxAudio package (PSG + SCC).</Description>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="icon.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*" />
