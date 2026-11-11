@@ -106,10 +106,16 @@ another backend (SDL, NAudio, a custom mixer, the visualizer…).
 ## Visual player (MonoGame)
 
 `tools/MsxAudioVisualizer` opens a **VGM** (file, folder or *drag & drop*), plays it in real time and
-shows everything the chips are doing.
+shows everything the chips are doing. **F2** (or the `OPEN` button in the playlist) opens an in-app
+folder browser with a **recursive** option, so you can browse a whole collection without leaving the
+player; the last folder, view, profile and window size are remembered between runs
+(`%APPDATA%\MsxAudio\visualizer.json`, or a `visualizer.json` next to the executable for a portable
+install).
 
 | Key | Action |
 | :--- | :--- |
+| `F2` / `Ctrl+O` | open the **folder browser** (recursive option inside) |
+| `F5` | rescan the current folder |
 | `↑` / `↓` | select a track from the folder |
 | `Enter` (or click) | play the selected track |
 | `Space` | pause / resume |
@@ -117,12 +123,13 @@ shows everything the chips are doing.
 | `P` / `S` | toggle **PSG** / **SCC** |
 | `1 2 3` | PSG channels 1..3 |
 | `4 5 6 7 8` | SCC channels 1..5 |
-| `O` | mixing profile (`original` / `stereo` / `remaster`) |
+| `O` | **mixing profile dialog** (with the details of each profile) |
+| `Shift+O` | cycle the profile without opening the dialog |
 | `L` | auto-next |
 | `Tab` (or the header button) | cycle **spectrum** → **piano roll** → **piano** |
 | `R` | restart |
 | `H` | help overlay |
-| `Esc` | quit |
+| `Esc` | close a dialog, otherwise quit |
 
 In the **piano** view:
 
@@ -184,6 +191,9 @@ MsxAudioVisualizer music/stage_a.vgm --roll
 
 # start on the playable piano
 MsxAudioVisualizer music/stage_a.vgm --view piano
+
+# open a collection (all .vgm below the folder)
+MsxAudioVisualizer "C:\music\msx" --recursive
 ```
 
 Recording is **deterministic**: every frame advances exactly `1/fps` seconds of music, independent of

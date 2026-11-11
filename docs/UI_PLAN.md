@@ -1,5 +1,8 @@
 # Visualizer UI overhaul — plan
 
+> **Status:** Phase 1 is implemented — folder browser (`F2`), recursive scanning, persisted settings,
+> playlist with durations and the mixing-profile dialog (`O`). Phase 2 (transport bar) is next.
+
 Goal: make `tools/MsxAudioVisualizer` feel like an application, not a demo. The player already
 shows more than most MSX tools (per-channel scopes, wave RAM, roll, piano, song map, dB spectrum);
 what is missing is **navigation** (where the music comes from), **control** (play, loop, volume) and

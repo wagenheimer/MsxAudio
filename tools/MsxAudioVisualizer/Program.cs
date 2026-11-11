@@ -27,14 +27,16 @@ public static class Program
     {
         string? file = null;
         string dir = Directory.GetCurrentDirectory();
+        string? explicitFolder = null;
         string? record = null;
         string? audioOnly = null;
-        string profileName = "stereo";
+        string? profileName = null;
         int seconds = 10;
         int fps = 30;
-        int width = 1280;
-        int height = 720;
+        int width = 0;
+        int height = 0;
         string? view = null;
+        bool? recursive = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -68,6 +70,12 @@ public static class Program
                 case "--profile":
                     if (i + 1 < args.Length) profileName = args[++i];
                     break;
+                case "--recursive":
+                    recursive = true;
+                    break;
+                case "--no-recursive":
+                    recursive = false;
+                    break;
                 default:
                     if (File.Exists(arg))
                     {
@@ -77,6 +85,7 @@ public static class Program
                     else if (Directory.Exists(arg))
                     {
                         dir = Path.GetFullPath(arg);
+                        explicitFolder = dir;
                     }
 
                     break;
@@ -100,13 +109,15 @@ public static class Program
                 return;
             }
 
-            RenderAudioOnly(file, audioOnly, seconds, AudioProfile.ByName(profileName));
+            RenderAudioOnly(file, audioOnly, seconds,
+                profileName is null ? AudioProfile.Stereo : AudioProfile.ByName(profileName));
             return;
         }
 
         Directory.SetCurrentDirectory(dir);
 
-        using var game = new VisualizerGame(file, record, seconds, fps, width, height, AudioProfile.ByName(profileName), view);
+        using var game = new VisualizerGame(file, record, seconds, fps, width, height,
+            profileName is null ? null : AudioProfile.ByName(profileName), view, explicitFolder, recursive);
         game.Run();
     }
 

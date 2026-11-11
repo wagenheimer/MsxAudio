@@ -47,10 +47,13 @@ public sealed partial class VisualizerGame : Game
 
             string time = $"{FormatTime(_player.Time)} / {FormatTime(_player.TotalSeconds)}";
             Text(time, VW - 16 - PixelFont.Measure(time), 12, TextColor, 2);
-
-            string info = $"PSG {(int)(_player.Song.AyClock / 1000)}KHZ  SCC {(int)(1789772.5 / 1000)}KHZ  OUT 48KHZ  X{_player.Oversample}  {_player.Profile.Name.ToUpperInvariant()}";
-            Text(info, VW - 16 - PixelFont.Measure(info), 30, Dim);
         }
+
+        // Profile chip: shows the current mix and opens the profile dialog.
+        string profileLabel = "PROFILE: " + (_player?.Profile.Name ?? _profile.Name).ToUpperInvariant();
+        int labelWidth = PixelFont.Measure(profileLabel) + 14;
+        _profileButtonHit = new Rectangle(VW - 16 - labelWidth, 29, labelWidth, 14);
+        DrawButton(_profileButtonHit, profileLabel, true, Accent);
     }
 
     private static string FormatTime(double seconds)
@@ -120,6 +123,9 @@ public sealed partial class VisualizerGame : Game
 
         _status = ViewName(_view);
         _statusTimer = 2f;
+
+        _settings.View = _view.ToString().ToLowerInvariant();
+        _settings.Save();
     }
 
     private static string ViewName(PanelView view) => view switch
@@ -166,8 +172,14 @@ public sealed partial class VisualizerGame : Game
         string chipState = p is null ? "" : $"PSG[{(p.PsgEnabled ? "ON" : "OFF")}] SCC[{(p.SccEnabled ? "ON" : "OFF")}]{(p.SoloChannel is int s ? "  SOLO " + ChannelName(s) : "")}";
         Text(chipState, 16, VH - 50, TextColor);
 
-        Text("TAB/HEADER VIEW   UP/DOWN TRACK   ENTER PLAY   SPACE PAUSE   LEFT/RIGHT SEEK   CLICK: TRACK / BAR / S-M", 16, VH - 36, Dim);
-        Text("P PSG   S SCC   1-8 CHANNEL   O PROFILE   L AUTONEXT   R RESTART   H HELP   ESC QUIT", 16, VH - 22, Dim);
+        if (p is not null)
+        {
+            string info = $"PSG {(int)(p.Song.AyClock / 1000)}KHZ  SCC 1789KHZ  OUT 48KHZ  X{p.Oversample}";
+            Text(info, VW - 16 - PixelFont.Measure(info), VH - 50, Dim);
+        }
+
+        Text("F2 OPEN FOLDER   O PROFILE   UP/DOWN TRACK   ENTER PLAY   SPACE PAUSE   LEFT/RIGHT SEEK   TAB VIEW", 16, VH - 36, Dim);
+        Text("P PSG   S SCC   1-8 CHANNEL   SHIFT+O CYCLE PROFILE   L AUTONEXT   R RESTART   H HELP   ESC QUIT", 16, VH - 22, Dim);
 
         if (_statusTimer > 0)
         {
@@ -178,7 +190,7 @@ public sealed partial class VisualizerGame : Game
 
     private void DrawHelp()
     {
-        const int w = 660, h = 356;
+        const int w = 660, h = 416;
         int x = (VW - w) / 2, y = (VH - h) / 2;
         Panel(x, y, w, h, PanelHi);
         Rect(x, y, w, 24, PanelColor);
@@ -187,6 +199,8 @@ public sealed partial class VisualizerGame : Game
         string[] lines =
         {
             "TAB / HEADER   SPECTRUM / PIANO ROLL / PIANO",
+            "F2 / CTRL+O    OPEN FOLDER (RECURSIVE OPTION)",
+            "F5             RESCAN THE CURRENT FOLDER",
             "UP / DOWN      SELECT TRACK",
             "ENTER          PLAY SELECTED",
             "SPACE          PAUSE / RESUME",
@@ -197,18 +211,19 @@ public sealed partial class VisualizerGame : Game
             "P / S          TOGGLE PSG / SCC",
             "1 2 3          PSG CHANNELS",
             "4 5 6 7 8      SCC CHANNELS",
-            "O              AUDIO PROFILE",
+            "O              MIXING PROFILE (DIALOG)",
+            "SHIFT+O        NEXT PROFILE",
             "L              AUTO NEXT",
             "R              RESTART",
             "H              THIS HELP",
-            "ESC            QUIT",
+            "ESC            CLOSE DIALOG / QUIT",
             "",
             "PIANO: CLICK AND HOLD A KEY TO PLAY THE SELECTED",
             "CHANNEL'S INSTRUMENT (WORKS WHILE PAUSED); RELEASE",
             "TO STOP. DRAG ACROSS THE KEYS TO SLIDE. 'PLAY ALL'",
             "WALKS THE AUDIBLE CHANNELS; '<' / '>' CHANGE OCTAVE.",
             "",
-            "DRAG A .VGM FILE INTO THE WINDOW TO PLAY IT",
+            "DROP A .VGM OR A FOLDER INTO THE WINDOW TO LOAD IT",
             "MSXAUDIOVISUALIZER SONG.VGM --RECORD OUT.GIF --SECONDS 10",
         };
 

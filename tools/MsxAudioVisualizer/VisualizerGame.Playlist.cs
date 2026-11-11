@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Audio;
 using Microsoft.Xna.Framework.Graphics;
@@ -14,17 +16,101 @@ namespace Wagenheimer.MsxAudio.Visualizer;
 
 public sealed partial class VisualizerGame : Game
 {
-    private void ScanTracks(string dir)
+    // Folder currently scanned, the running scan task and its progress (worker thread writes it).
+    private string _scanRoot = string.Empty;
+    private Task<ScanResult>? _listScan;
+    private CancellationTokenSource? _listCts;
+    private bool _listScanning;
+    private string? _listSelectPath;
+    private string? _scanError;
+    private volatile int _listScanProgress;
+    private Rectangle _openFolderHit;
+
+    /// <summary>
+    /// Scans <paramref name="dir"/> in the background (recursive or not) and replaces the playlist
+    /// when it finishes. The audio of the current track keeps playing meanwhile.
+    /// </summary>
+    private void ScanTracks(string dir, bool recursive, string? selectPath = null)
     {
+        if (string.IsNullOrWhiteSpace(dir))
+            return;
+
+        _listCts?.Cancel();
+        _listCts?.Dispose();
+        _listCts = new CancellationTokenSource();
+
+        _scanRoot = dir;
+        _listSelectPath = selectPath;
+        _listScanning = true;
+        _listScanProgress = 0;
+        _scanError = null;
+
+        CancellationToken token = _listCts.Token;
+        _listScan = Task.Run(() =>
+        {
+            try
+            {
+                return Library.Scan(dir, recursive, token, count => _listScanProgress = count);
+            }
+            catch (OperationCanceledException)
+            {
+                return null;
+            }
+        }, token);
+    }
+
+    /// <summary>Called from Update: consumes a finished background scan.</summary>
+    private void PollScan()
+    {
+        if (_listScan is null || !_listScan.IsCompleted)
+            return;
+
+        Task<ScanResult> task = _listScan;
+        _listScan = null;
+        _listScanning = false;
+
+        ScanResult? result = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
+        if (result is null)
+            return;
+
         _tracks.Clear();
+        _tracks.AddRange(result.Files);
+        _scanError = result.Error;
+
+        if (_listSelectPath is not null)
+        {
+            int found = _tracks.FindIndex(t => string.Equals(t.Path, _listSelectPath, StringComparison.OrdinalIgnoreCase));
+            if (found >= 0)
+                _selected = found;
+
+            _listSelectPath = null;
+        }
+        else
+        {
+            _selected = Math.Clamp(_selected, 0, Math.Max(0, _tracks.Count - 1));
+        }
+
+        if (_player is null && _tracks.Count > 0)
+            LoadTrack(_selected);
+
+        _status = result.Error is null
+            ? $"FOUND {_tracks.Count} FILE(S)"
+            : "SCAN ERROR: " + result.Error;
+        _statusTimer = 3f;
+    }
+
+    /// <summary>Opens a folder: remembers it, scans it and (if nothing is loaded) plays the first file.</summary>
+    private void SetFolder(string dir)
+    {
         if (!Directory.Exists(dir))
             return;
 
-        _tracks.AddRange(Directory
-            .EnumerateFiles(dir, "*.vgm", SearchOption.TopDirectoryOnly)
-            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase));
-    }
+        _settings.LastFolder = dir;
+        _settings.AddRecent(dir);
+        _settings.Save();
 
+        ScanTracks(dir, _settings.Recursive);
+    }
     /// <summary>
     /// Freezes a mute/solo state at startup, for docs and screenshots:
     /// <c>MSXAUDIO_MUTE=0,3</c> and <c>MSXAUDIO_SOLO=4</c> (channel indexes 0..7).
@@ -55,10 +141,10 @@ public sealed partial class VisualizerGame : Game
             return;
 
         _selected = index;
-        LoadFile(_tracks[index]);
+        LoadFile(_tracks[index].Path);
     }
 
-    private void LoadFile(string path)
+    private void LoadFile(string path, bool rescan = true)
     {
         try
         {
@@ -81,11 +167,36 @@ public sealed partial class VisualizerGame : Game
             _paused = false;
 
             var folder = Path.GetDirectoryName(path) ?? ".";
-            if (!string.Equals(folder, _startDir, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(_settings.LastFolder, folder, StringComparison.OrdinalIgnoreCase))
             {
-                ScanTracks(folder);
-                int found = _tracks.FindIndex(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
-                if (found >= 0) _selected = found;
+                _settings.LastFolder = folder;
+                _settings.AddRecent(folder);
+                _settings.Save();
+            }
+
+            if (!rescan)
+            {
+                int found = _tracks.FindIndex(t => string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase));
+                if (found >= 0)
+                    _selected = found;
+                else if (_listScanning)
+                    _listSelectPath = path;
+            }
+            else if (!string.Equals(folder, _scanRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                _settings.LastFolder = folder;
+                _settings.AddRecent(folder);
+                _settings.Save();
+                ScanTracks(folder, _settings.Recursive, path);
+            }
+            else
+            {
+                // Same folder: just move the selection (the scan may still be running).
+                int found = _tracks.FindIndex(t => string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase));
+                if (found >= 0)
+                    _selected = found;
+                else if (_listScanning)
+                    _listSelectPath = path;
             }
 
             Console.WriteLine($"[Visualizer] loaded {path} events={vgm.Events.Count} len={vgm.TotalSeconds:0.0}s");
@@ -110,6 +221,11 @@ public sealed partial class VisualizerGame : Game
         Panel(x, y, w, h);
 
         Text("TRACKS", x + 10, y + 8, Accent);
+
+        // Open-folder button in the panel header.
+        _openFolderHit = new Rectangle(x + w - 54, y + 3, 44, 15);
+        DrawButton(_openFolderHit, "OPEN", false, Accent);
+
         Rect(x + 10, y + 24, w - 20, 1, Grid);
 
         int rows = (h - 90) / 18;
@@ -122,34 +238,87 @@ public sealed partial class VisualizerGame : Game
             int index = first + i;
             int rowY = y + 30 + i * 18;
             bool active = index == _selected;
+            var entry = _tracks[index];
 
             if (active)
                 Rect(x + 6, rowY - 4, w - 12, 17, PanelHi);
 
             _trackHit.Add((new Rectangle(x + 4, rowY - 5, w - 8, 18), index));
 
-            string name = Path.GetFileNameWithoutExtension(_tracks[index]).ToUpperInvariant();
-            if (name.Length > 30) name = name[..30];
-            Text(name, x + 12, rowY, active ? Accent : Dim);
+            string name = entry.Name.ToUpperInvariant();
+            int maxName = _settings.Recursive ? 18 : 26;
+            if (name.Length > maxName)
+                name = name[..maxName];
+
+            Text(name, x + 12, rowY, active ? Accent : TextColor);
+
+            if (_settings.Recursive)
+            {
+                string folder = Path.GetFileName(entry.Folder).ToUpperInvariant();
+                if (folder.Length > 9)
+                    folder = folder[..9];
+                Text(folder, x + 12 + (maxName + 2) * 6, rowY, Dim);
+            }
+
+            if (entry.Seconds is double seconds)
+            {
+                string length = FormatTime(seconds);
+                Text(length, x + w - 12 - PixelFont.Measure(length), rowY, active ? Accent : Dim);
+            }
         }
 
         if (_tracks.Count == 0)
         {
-            Text("NO .VGM FILES", x + 10, y + 40, Warn);
-            Text("DROP A .VGM HERE", x + 10, y + 56, Dim);
+            if (_listScanning)
+            {
+                Text("SCANNING…", x + 10, y + 40, Accent);
+                Text($"{_listScanProgress} FILE(S)", x + 10, y + 56, Dim);
+            }
+            else if (_scanError is not null)
+            {
+                Text("SCAN ERROR", x + 10, y + 40, Warn);
+                Text(_scanError.ToUpperInvariant(), x + 10, y + 56, Dim);
+            }
+            else
+            {
+                Text("NO .VGM FILES", x + 10, y + 40, Warn);
+                Text("PRESS F2 OR CLICK OPEN", x + 10, y + 56, Dim);
+                Text("OR DROP A FOLDER HERE", x + 10, y + 72, Dim);
+            }
         }
 
-        int listY = y + h - 46;
+        int listY = y + h - 64;
         Rect(x + 10, listY, w - 20, 1, Grid);
-        string length = _player is null ? "--:--" : FormatTime(_player.TotalSeconds);
-        Text($"LENGTH {length}", x + 10, listY + 6, Dim);
-        Text($"{_tracks.Count} FILE(S)", x + 10, listY + 20, Dim);
+
+        if (_listScanning)
+        {
+            Text($"SCANNING… {_listScanProgress}", x + 10, listY + 6, Accent);
+        }
+        else
+        {
+            string count = $"{_tracks.Count} FILE(S)" + (_settings.Recursive ? "  RECURSIVE" : "");
+            Text(count, x + 10, listY + 6, Dim);
+        }
+
+        string length2 = _player is null ? "--:--" : FormatTime(_player.TotalSeconds);
+        Text($"LENGTH {length2}", x + 10, listY + 20, Dim);
+
+        // Current folder, truncated to fit the panel.
+        string folderPath = _scanRoot.ToUpperInvariant();
+        if (folderPath.Length > 29)
+            folderPath = "…" + folderPath[^28..];
+        Text(folderPath, x + 10, listY + 34, Dim);
     }
 
     private void DrawEmpty()
     {
         Panel(336, 52, VW - 348, 616);
-        Text("DROP A .VGM FILE OR PASS A FOLDER AS THE FIRST ARGUMENT", 368, 330, Dim);
-        Text("MSXAUDIOVISUALIZER <FILE.VGM | FOLDER> [--RECORD OUT.GIF --SECONDS 10]", 368, 350, Dim);
+        Text("NO SONG LOADED", 368, 300, Accent, 2);
+        Text("PRESS F2 TO OPEN A FOLDER, OR DROP A .VGM / FOLDER INTO THE WINDOW", 368, 330, Dim);
+        Text("CLI: MSXAUDIOVISUALIZER <FILE.VGM | FOLDER> [--RECORD OUT.GIF --SECONDS 10]", 368, 350, Dim);
+
+        var open = new Rectangle(368, 380, 96, 18);
+        _openFolderHit = open;
+        DrawButton(open, "OPEN FOLDER", false, Accent);
     }
 }

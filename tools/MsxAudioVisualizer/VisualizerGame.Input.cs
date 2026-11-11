@@ -24,14 +24,36 @@ public sealed partial class VisualizerGame : Game
 
     private void HandleInput()
     {
+        // A dialog owns the input until it closes.
+        if (_dialog != DialogKind.None)
+        {
+            HandleDialogInput();
+            return;
+        }
+
+        bool ctrl = _keys.IsKeyDown(Keys.LeftControl) || _keys.IsKeyDown(Keys.RightControl);
+        bool shift = _keys.IsKeyDown(Keys.LeftShift) || _keys.IsKeyDown(Keys.RightShift);
+
         if (Pressed(Keys.Escape))
             Exit();
+
+        if (Pressed(Keys.F2) || (ctrl && Pressed(Keys.O)))
+            OpenFolderDialog();
 
         if (Pressed(Keys.H))
             _showHelp = !_showHelp;
 
         if (Pressed(Keys.Tab))
             CycleView();
+
+        if (Pressed(Keys.O))
+        {
+            // O opens the profile dialog; Shift+O keeps the quick cycle.
+            if (shift)
+                CycleProfile();
+            else
+                OpenProfileDialog();
+        }
 
         if (Pressed(Keys.Up) && _tracks.Count > 0)
         {
@@ -91,9 +113,6 @@ public sealed partial class VisualizerGame : Game
                 _player.ChannelMuted[i] = !_player.ChannelMuted[i];
         }
 
-        if (Pressed(Keys.O))
-            CycleProfile();
-
         if (Pressed(Keys.L))
         {
             _autoNext = !_autoNext;
@@ -117,6 +136,22 @@ public sealed partial class VisualizerGame : Game
                 StopPianoHold();
             else if (_view == PanelView.Piano && _player is not null)
                 DragPianoHold(p);
+        }
+
+        // Header/playlist buttons work even before a song is loaded.
+        if (pressed)
+        {
+            if (_profileButtonHit.Contains(p))
+            {
+                OpenProfileDialog();
+                return;
+            }
+
+            if (_openFolderHit.Contains(p))
+            {
+                OpenFolderDialog();
+                return;
+            }
         }
 
         // Playlist: click a track to select and play it (works even before a song is loaded).

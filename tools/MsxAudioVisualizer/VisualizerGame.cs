@@ -50,8 +50,9 @@ public sealed partial class VisualizerGame : Game
     private Texture2D _pixel = null!;
     private RenderTarget2D _target = null!;
 
-    private readonly List<string> _tracks = new();
+    private readonly List<VgmEntry> _tracks = new();
     private int _selected;
+    private readonly VisualizerSettings _settings;
 
     private VgmPlayer? _player;
     private DynamicSoundEffectInstance? _sound;
@@ -73,7 +74,7 @@ public sealed partial class VisualizerGame : Game
     private bool _paused;
     private bool _autoNext = true;
     private bool _showHelp;
-    private readonly AudioProfile _profile;
+    private AudioProfile _profile;
 
     // Piano roll: one event list per channel (only on key / pitch changes).
     private sealed class NoteEvent
@@ -156,25 +157,36 @@ public sealed partial class VisualizerGame : Game
     private int _gifWidth, _gifHeight, _gifFactor = 1;
 
     public VisualizerGame(string? file, string? recordPath = null, int recordSeconds = 10, int recordFps = 30,
-        int windowWidth = VW, int windowHeight = VH, AudioProfile? profile = null, string? startView = null)
+        int windowWidth = 0, int windowHeight = 0, AudioProfile? profile = null, string? startView = null,
+        string? startFolder = null, bool? recursive = null)
     {
-        _profile = profile ?? AudioProfile.Stereo;
+        _settings = VisualizerSettings.Load();
+        if (recursive is not null)
+            _settings.Recursive = recursive.Value;
+
+        // CLI wins; otherwise use what the user had last time.
+        _profile = profile ?? AudioProfile.ByName(_settings.Profile);
 
         // A screenshot gate must not depend on the audio device pacing the buffers: one update per
         // drawn frame, each advancing a fixed 1/60 s (see AdvanceForScreenshot).
         if (_shotPending)
             IsFixedTimeStep = false;
 
-        _view = startView?.ToLowerInvariant() switch
+        string view = startView ?? _settings.View;
+        _view = view.ToLowerInvariant() switch
         {
             "roll" or "pianoroll" => PanelView.Roll,
             "piano" or "keys" => PanelView.Piano,
             _ => PanelView.Spectrum,
         };
+
+        int width = windowWidth > 0 ? windowWidth : _settings.WindowWidth;
+        int height = windowHeight > 0 ? windowHeight : _settings.WindowHeight;
+
         _graphics = new GraphicsDeviceManager(this)
         {
-            PreferredBackBufferWidth = Math.Max(640, windowWidth),
-            PreferredBackBufferHeight = Math.Max(360, windowHeight),
+            PreferredBackBufferWidth = Math.Max(640, width),
+            PreferredBackBufferHeight = Math.Max(360, height),
             SynchronizeWithVerticalRetrace = true,
         };
 
@@ -184,9 +196,17 @@ public sealed partial class VisualizerGame : Game
         Window.Title = "MSX Audio Visualizer — PSG + SCC";
 
         _startFile = file;
-        _startDir = file is not null
-            ? Path.GetDirectoryName(Path.GetFullPath(file)) ?? "."
-            : Directory.GetCurrentDirectory();
+
+        // No positional argument: reopen the last folder when it still exists.
+        string? startDir = null;
+        if (file is not null)
+            startDir = Path.GetDirectoryName(Path.GetFullPath(file));
+        else if (!string.IsNullOrWhiteSpace(startFolder))
+            startDir = startFolder;
+        else if (!string.IsNullOrWhiteSpace(_settings.LastFolder) && Directory.Exists(_settings.LastFolder))
+            startDir = _settings.LastFolder;
+
+        _startDir = startDir ?? Directory.GetCurrentDirectory();
 
         _recordPath = recordPath;
         _recordSeconds = Math.Max(1, recordSeconds);
@@ -199,11 +219,19 @@ public sealed partial class VisualizerGame : Game
 
         Window.FileDrop += (_, e) =>
         {
-            if (e.Files.Length > 0)
-                LoadFile(e.Files[0]);
+            if (e.Files.Length == 0)
+                return;
+
+            string dropped = e.Files[0];
+            if (Directory.Exists(dropped))
+                SetFolder(dropped);
+            else
+                LoadFile(dropped);
         };
 
         Window.ClientSizeChanged += (_, _) => ApplyWindowSize();
+
+        Exiting += (_, _) => SaveSettings();
 
         if (!string.IsNullOrWhiteSpace(_recordPath))
         {
@@ -228,12 +256,30 @@ public sealed partial class VisualizerGame : Game
             }
         }
 
-        ScanTracks(_startDir);
+        if (_startFile is null &&
+            !string.Equals(_settings.LastFolder, _startDir, StringComparison.OrdinalIgnoreCase))
+        {
+            _settings.LastFolder = _startDir;
+            _settings.AddRecent(_startDir);
+            _settings.Save();
+        }
+
+        ScanTracks(_startDir, _settings.Recursive, _startFile);
 
         if (_startFile is not null && File.Exists(_startFile))
             LoadFile(_startFile);
-        else if (_tracks.Count > 0)
-            LoadTrack(0);
+
+        // Docs/CI: open a dialog at startup (input is ignored in screenshot runs).
+        string? dialog = Environment.GetEnvironmentVariable("MSXAUDIO_DIALOG");
+        if (!string.IsNullOrWhiteSpace(dialog))
+        {
+            if (dialog.Equals("folder", StringComparison.OrdinalIgnoreCase))
+                OpenFolderDialog();
+            else if (dialog.Equals("profile", StringComparison.OrdinalIgnoreCase))
+                OpenProfileDialog();
+            else if (dialog.Equals("help", StringComparison.OrdinalIgnoreCase))
+                _showHelp = true;
+        }
 
         // Recording starts with audio already flowing, so the first frame is not empty. This chunk
         // belongs to the interval *before* frame 0, so it is not written to the WAV.
@@ -290,6 +336,11 @@ public sealed partial class VisualizerGame : Game
         // during the few frames of the gate would change the view or the track).
         if (!_shotPending)
             HandleInput();
+
+        PollScan();
+
+        if (_dialog != DialogKind.None)
+            PollDialogScan();
 
         if (_player is not null && !_recording)
         {
@@ -397,39 +448,10 @@ public sealed partial class VisualizerGame : Game
 
     private void CycleProfile()
     {
-        if (_player is null)
-            return;
-
         var profiles = AudioProfile.All;
-        int current = Array.FindIndex(profiles, p => p.Name == _player.Profile.Name);
+        int current = Array.FindIndex(profiles, p => p.Name == _profile.Name);
         var next = profiles[(current + 1 + profiles.Length) % profiles.Length];
-        double time = _player.Time;
-
-        var vgm = _player.Song;
-        var muted = (bool[])_player.ChannelMuted.Clone();
-        int? solo = _player.SoloChannel;
-        bool psgOn = _player.PsgEnabled;
-        bool sccOn = _player.SccEnabled;
-
-        _player.Dispose();
-        _player = new VgmPlayer(vgm, loop: true, sampleRate: 48000, oversample: next.Oversample, profile: next);
-        _player.Seek(time);
-
-        // Keep what the user was listening to: mute, solo and chip toggles survive a profile change.
-        for (int i = 0; i < 8; i++)
-            _player.ChannelMuted[i] = muted[i];
-
-        _player.SoloChannel = solo;
-        _player.PsgEnabled = psgOn;
-        _player.SccEnabled = sccOn;
-
-        _heldKeyMidi = -1;
-        _auditionTimer = 0f;
-        ClearNotes();
-        FlushAudio();
-
-        _status = "PROFILE: " + next.Name.ToUpperInvariant();
-        _statusTimer = 2f;
+        ApplyProfile(next);
     }
 
     private void FlushAudio()
@@ -439,6 +461,25 @@ public sealed partial class VisualizerGame : Game
 
         _sound.Stop();
         _sound.Play();
+    }
+
+    /// <summary>Remembers the window size, view and profile for the next run.</summary>
+    private void SaveSettings()
+    {
+        _settings.Profile = _profile.Name;
+        _settings.View = _view.ToString().ToLowerInvariant();
+
+        try
+        {
+            _settings.WindowWidth = Math.Max(640, Window.ClientBounds.Width);
+            _settings.WindowHeight = Math.Max(360, Window.ClientBounds.Height);
+        }
+        catch (Exception)
+        {
+            // window already gone: keep the previous size
+        }
+
+        _settings.Save();
     }
 
 
@@ -486,6 +527,8 @@ public sealed partial class VisualizerGame : Game
 
         if (_showHelp)
             DrawHelp();
+
+        DrawDialog();
 
         _batch.End();
 
