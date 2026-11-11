@@ -565,8 +565,8 @@ public sealed partial class VisualizerGame : Game
     private static readonly double[] FrequencyMarks = { 100, 1000, 10000 };
 
 
-    // Clickable "next view" toggle in the panel header.
-    private Rectangle _viewToggleHit;
+    // Clickable view tabs in the analyzer panel header.
+    private readonly Rectangle[] _viewTabHit = new Rectangle[3];
 
 
     private static readonly string[] Notes = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };

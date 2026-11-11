@@ -40,7 +40,7 @@ public sealed partial class VisualizerGame : Game
 
     // ── Profile dialog ───────────────────────────────────────────────────────────
     private int _profileSel;
-    private readonly Rectangle[] _profileCardHit = new Rectangle[3];
+    private readonly Rectangle[] _profileCardHit = new Rectangle[4];
 
     private const int DialogRows = 21;   // visible rows in each browser list
 
@@ -189,6 +189,7 @@ public sealed partial class VisualizerGame : Game
         ("MONO   4X", "CHANNELS CENTRED   DC CUT 12 HZ", "EXACTLY THE HARDWARE MIX"),
         ("STEREO   4X", "PSG -0.30/+0.30   SCC -0.55/+0.55", "HP 20 HZ   LP 16 KHZ"),
         ("STEREO   8X", "PSG -0.40/+0.40   SCC -0.70/+0.70   REVERB 18%", "HP 25 HZ   LP 17 KHZ   PEAK 0.89"),
+        ("MONO   4X", "SCC MUTED - THE PSG CHANNELS ALONE", "A MACHINE WITHOUT THE SCC CHIP"),
     };
 
     /// <summary>Recreates the player with another mix, keeping position, mute, solo and chip toggles.</summary>
@@ -206,8 +207,6 @@ public sealed partial class VisualizerGame : Game
         var vgm = _player.Song;
         var muted = (bool[])_player.ChannelMuted.Clone();
         int? solo = _player.SoloChannel;
-        bool psgOn = _player.PsgEnabled;
-        bool sccOn = _player.SccEnabled;
         double? loopA = _player.LoopA;
         double? loopB = _player.LoopB;
 
@@ -219,12 +218,15 @@ public sealed partial class VisualizerGame : Game
             _player.ChannelMuted[i] = muted[i];
 
         _player.SoloChannel = solo;
-        _player.PsgEnabled = psgOn;
-        _player.SccEnabled = sccOn;
         _player.LoopA = loopA;
         _player.LoopB = loopB;
         _player.Volume = _volume;
         _player.LoopEnabled = _loopEnabled;
+
+        // The profile decides which chips are audible: the "PSG only" profile has SccGain = 0, and
+        // the strips/footer show the SCC off so the screen matches what is heard.
+        _player.PsgEnabled = next.PsgGain > 0f;
+        _player.SccEnabled = next.SccGain > 0f;
 
         _profile = next;
         _settings.Profile = next.Name;
@@ -417,17 +419,17 @@ public sealed partial class VisualizerGame : Game
         if (Pressed(Keys.Escape) || Pressed(Keys.Enter))
         {
             if (Pressed(Keys.Enter))
-                ApplyProfile(AudioProfile.All[Math.Clamp(_profileSel, 0, 2)]);
+                ApplyProfile(AudioProfile.All[Math.Clamp(_profileSel, 0, AudioProfile.All.Length - 1)]);
 
             CloseDialog();
             return;
         }
 
         if (Pressed(Keys.Up))
-            _profileSel = (_profileSel + 2) % 3;
+            _profileSel = (_profileSel + AudioProfile.All.Length - 1) % AudioProfile.All.Length;
 
         if (Pressed(Keys.Down))
-            _profileSel = (_profileSel + 1) % 3;
+            _profileSel = (_profileSel + 1) % AudioProfile.All.Length;
 
         bool pressed = _mouse.LeftButton == ButtonState.Pressed &&
                        _prevMouse.LeftButton == ButtonState.Released;
@@ -588,7 +590,7 @@ public sealed partial class VisualizerGame : Game
 
     private void DrawProfileDialog()
     {
-        const int dx = 320, dy = 190, dw = 640, dh = 340;
+        const int dx = 320, dy = 150, dw = 640, dh = 430;
         Panel(dx, dy, dw, dh);
         Rect(dx, dy, dw, 24, PanelColor);
         Text("MIXING PROFILE", dx + 12, dy + 8, Accent);

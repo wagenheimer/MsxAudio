@@ -39,7 +39,12 @@ public class PackageApiTests
     {
         Assert.Equal("stereo", AudioProfile.ByName("STEREO").Name);
         Assert.Equal("remaster", AudioProfile.ByName("remaster").Name);
+        Assert.Equal("psg", AudioProfile.ByName("psg").Name);
         Assert.Equal("original", AudioProfile.ByName("nonsense").Name);
+
+        // "PSG only" mutes the SCC and keeps the PSG untouched.
+        Assert.Equal(0f, AudioProfile.PsgOnly.SccGain);
+        Assert.Equal(1f, AudioProfile.PsgOnly.PsgGain);
 
         var quiet = AudioProfile.Remaster.WithOversample(2);
         Assert.Equal(2, quiet.Oversample);

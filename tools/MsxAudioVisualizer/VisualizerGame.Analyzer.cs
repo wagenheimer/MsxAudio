@@ -53,9 +53,7 @@ public sealed partial class VisualizerGame : Game
         const int x = 336, y = 104, w = VW - 348, h = 182;
         Panel(x, y, w, h);
 
-        Text("SPECTRUM", x + 10, y + 6, Accent);
-        string next = NextViewLabel();
-        DrawViewToggle(x + w - PixelFont.Measure(next) - 22, y + 2, next);
+        DrawViewTabs(x + 10, y + 2);
 
         // Room for the dB scale on the left and the frequency labels under the plot.
         const int gutter = 40;
@@ -119,13 +117,10 @@ public sealed partial class VisualizerGame : Game
         const int x = 336, y = 104, w = VW - 348, h = 326;
         Panel(x, y, w, h);
 
-        Text("PIANO ROLL", x + 10, y + 6, Accent);
+        int tabsRight = DrawViewTabs(x + 10, y + 2);
 
-        string next = NextViewLabel();
-        DrawViewToggle(x + w - PixelFont.Measure(next) - 22, y + 2, next);
-
-        // Channel legend (same colours as the notes).
-        int lx = x + 88;
+        // Channel legend (same colours as the notes), after the tabs.
+        int lx = tabsRight + 16;
         for (int ch = 0; ch < 8; ch++)
         {
             Rect(lx, y + 8, 5, 5, ChannelColors[ch]);
@@ -133,7 +128,7 @@ public sealed partial class VisualizerGame : Game
             lx += 42;
         }
 
-        Text("MAP BELOW: CLICK TO SEEK", x + 440, y + 7, Dim);
+        Text("MAP BELOW: CLICK TO SEEK", lx + 8, y + 7, Dim);
 
         const int gutter = 22;   // mini keyboard on the left
         const int axis = 10;     // time labels under the plot

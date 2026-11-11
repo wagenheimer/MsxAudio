@@ -15,7 +15,7 @@ namespace Wagenheimer.MsxAudio.Visualizer;
 ///   --seconds N                 recording length (default 10)
 ///   --fps N                     recording frame rate (default 30)
 ///   --width / --height          initial window size
-///   --profile name              mixing profile (original | stereo | remaster)
+///   --profile name              mixing profile (original | stereo | remaster | psg)
 ///   --view name                 start view: spectrum | roll | piano (--roll is kept as an alias)
 ///   --audio-only out.wav        render the audio only, without opening a window
 /// </code>

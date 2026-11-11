@@ -40,19 +40,38 @@ public sealed partial class VisualizerGame : Game
         Text("MSX AUDIO VISUALIZER", 16, 12, Accent, 2);
         Text("PSG AY-3-8910 + KONAMI SCC", 16, 30, Dim);
 
-        if (_player is not null)
-        {
-            string name = Path.GetFileNameWithoutExtension(_player.Name).ToUpperInvariant();
-            Text(name, 360, 16, TextColor, 2);
+        var p = _player;
 
-            string time = $"{FormatTime(_player.Time)} / {FormatTime(_player.TotalSeconds)}";
-            Text(time, VW - 16 - PixelFont.Measure(time), 12, TextColor, 2);
+        // Profile chip on the right (opens the profile dialog).
+        string profileLabel = "PROFILE: " + (p?.Profile.Name ?? _profile.Name).ToUpperInvariant();
+        int labelWidth = PixelFont.Measure(profileLabel) + 14;
+        int chipX = VW - 16 - labelWidth;
+        _profileButtonHit = new Rectangle(chipX, 28, labelWidth, 15);
+
+        if (p is not null)
+        {
+            string name = Path.GetFileNameWithoutExtension(p.Name).ToUpperInvariant();
+            if (name.Length > 26)
+                name = name[..26];
+            Text(name, 360, 12, TextColor, 2);
+
+            // Current position and total, measured at the same scale it is drawn with.
+            string time = $"{FormatTime(p.Time)} / {FormatTime(p.TotalSeconds)}";
+            Text(time, VW - 16 - PixelFont.Measure(time, 2), 12, TextColor, 2);
+
+            // Track counter and folder, kept clear of the profile chip.
+            string where = _tracks.Count > 0
+                ? $"TRACK {_selected + 1}/{_tracks.Count}   {Path.GetFileName(_scanRoot).ToUpperInvariant()}"
+                : string.Empty;
+
+            int room = Math.Max(0, (chipX - 370) / 6);
+            if (where.Length > room)
+                where = room > 1 ? where[..(room - 1)] + "…" : string.Empty;
+
+            if (where.Length > 0)
+                Text(where, 360, 30, Dim);
         }
 
-        // Profile chip: shows the current mix and opens the profile dialog.
-        string profileLabel = "PROFILE: " + (_player?.Profile.Name ?? _profile.Name).ToUpperInvariant();
-        int labelWidth = PixelFont.Measure(profileLabel) + 14;
-        _profileButtonHit = new Rectangle(VW - 16 - labelWidth, 29, labelWidth, 14);
         DrawButton(_profileButtonHit, profileLabel, true, Accent);
     }
 
@@ -115,14 +134,12 @@ public sealed partial class VisualizerGame : Game
         Text(text, x + w - 10 - PixelFont.Measure(text), y + 6, TextColor);
     }
 
-    private void CycleView()
+    private void SetView(PanelView view)
     {
-        _view = _view switch
-        {
-            PanelView.Spectrum => PanelView.Roll,
-            PanelView.Roll => PanelView.Piano,
-            _ => PanelView.Spectrum,
-        };
+        if (_view == view)
+            return;
+
+        _view = view;
 
         if (_view != PanelView.Piano)
         {
@@ -143,6 +160,13 @@ public sealed partial class VisualizerGame : Game
         _settings.Save();
     }
 
+    private void CycleView() => SetView(_view switch
+    {
+        PanelView.Spectrum => PanelView.Roll,
+        PanelView.Roll => PanelView.Piano,
+        _ => PanelView.Spectrum,
+    });
+
     private static string ViewName(PanelView view) => view switch
     {
         PanelView.Roll => "PIANO ROLL",
@@ -150,20 +174,28 @@ public sealed partial class VisualizerGame : Game
         _ => "SPECTRUM",
     };
 
-    /// <summary>Label of the view that the header button switches to.</summary>
-    private string NextViewLabel() => ViewName(_view switch
+    /// <summary>
+    /// Tab strip with the three analyzer views. The active tab is filled and outlined in the accent
+    /// colour, so it is obvious that these are tabs and which one is showing.
+    /// </summary>
+    /// <returns>The x coordinate right after the last tab.</returns>
+    private int DrawViewTabs(int x, int y)
     {
-        PanelView.Spectrum => PanelView.Roll,
-        PanelView.Roll => PanelView.Piano,
-        _ => PanelView.Spectrum,
-    });
+        int tx = x;
 
-    private void DrawViewToggle(int x, int y, string label)
-    {
-        int w = PixelFont.Measure(label) + 12;
-        _viewToggleHit = new Rectangle(x, y, w, 16);
-        DrawButton(_viewToggleHit, label, false, Accent);
-        Text(label, x + 6, y + 5, Dim);
+        for (int i = 0; i < 3; i++)
+        {
+            var view = (PanelView)i;
+            string label = ViewName(view);
+            int width = PixelFont.Measure(label) + 14;
+
+            _viewTabHit[i] = new Rectangle(tx, y, width, 18);
+            DrawButton(_viewTabHit[i], label, _view == view, Accent);
+
+            tx += width + 2;
+        }
+
+        return tx;
     }
 
     private void DrawButton(Rectangle rect, string label, bool active, Color activeColor)

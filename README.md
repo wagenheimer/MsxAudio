@@ -159,7 +159,8 @@ What you see:
   auditions that instrument — the same PSG envelope/ noise and SCC wave the song uses, mixed over the
   music. The note lasts as long as the mouse button is held. **Mute/solo also apply here**: a muted
   channel (or one filtered out by solo) stops lighting its keys and fades its selector, so the
-  keyboard shows exactly what is being heard;
+  keyboard shows exactly what is being heard. Selecting the **PSG profile** (`O`) or pressing `S`
+  turns the SCC off for a PSG-only listen;
 - the **MASTER** oscilloscope and the per-channel scopes draw a **min/max envelope** per pixel column,
   so peaks stay visible instead of being averaged away;
 - one strip per channel with live oscilloscope, volume, level with **peak hold**, frequency, nearest
@@ -286,7 +287,7 @@ MsxAudioTool import <vgm-folder> <out.msxaudio> [--title T] [--clips]
 MsxAudioTool info <package.msxaudio>
 MsxAudioTool extract <rom> <out.msxaudio> --profile profile.json [--openmsx path]
 MsxAudioTool extract-direct <rom> <out.msxaudio> --profile profile.json
-MsxAudioTool render <package.msxaudio> <id|all> <out.wav> [--profile original|stereo|remaster]
+MsxAudioTool render <package.msxaudio> <id|all> <out.wav> [--profile original|stereo|remaster|psg]
 MsxAudioTool verify <vgm> <capture.wav>
 MsxAudioTool unpack <package.msxaudio> <folder>
 ```
@@ -298,6 +299,11 @@ MsxAudioTool unpack <package.msxaudio> <folder>
 | `original` | faithful: all 8 channels centred, only the DC cut |
 | `stereo` | PSG at −30/0/+30 % and SCC at −55/−25/0/+25/+55 % + 16 kHz low-pass |
 | `remaster` | 8× oversampling, wider pan, 17 kHz low-pass, short reverb, peak normalisation |
+| `psg` | **SCC muted**: the PSG channels alone (the mix a machine without the SCC chip plays) |
+
+> The sound engine writes the **same PSG + SCC score on every cartridge**, so "PSG only" is the PSG
+> part of that score, not a separate arrangement — the `psg` profile (or the `S` key in the
+> visualizer) reproduces exactly what a machine without the SCC would hear.
 
 ## Validation
 

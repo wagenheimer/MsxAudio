@@ -249,10 +249,13 @@ public sealed partial class VisualizerGame : Game
         if (!pressed)
             return;
 
-        // Header toggle: cycle spectrum -> piano roll -> piano.
-        if (_viewToggleHit.Contains(p))
+        // View tabs: spectrum / piano roll / piano.
+        for (int i = 0; i < 3; i++)
         {
-            CycleView();
+            if (!_viewTabHit[i].Contains(p))
+                continue;
+
+            SetView((PanelView)i);
             return;
         }
 

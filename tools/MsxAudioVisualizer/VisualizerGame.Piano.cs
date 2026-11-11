@@ -202,11 +202,8 @@ public sealed partial class VisualizerGame : Game
         const int x = 336, y = 104, w = VW - 348, h = 326;
         Panel(x, y, w, h);
 
-        Text("PIANO", x + 10, y + 6, Accent);
-        Text("CLICK AND HOLD A KEY TO PLAY - DRAG TO SLIDE", x + 74, y + 7, Dim);
-
-        string next = NextViewLabel();
-        DrawViewToggle(x + w - PixelFont.Measure(next) - 22, y + 2, next);
+        int tabsRight = DrawViewTabs(x + 10, y + 2);
+        Text("CLICK AND HOLD A KEY TO PLAY - DRAG TO SLIDE", tabsRight + 16, y + 7, Dim);
 
         // Channel selector: the key plays the instrument of the selected channel.
         int rowY = y + 24;
