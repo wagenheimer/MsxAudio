@@ -346,7 +346,8 @@ straight into the player — no profile, no emulator, no CLI.
 | `8:1@2` | raw matrix: keyboard **row 8, bit 1**, two seconds after boot |
 
 Status: King's Valley II works through its profile (interrupt-driven driver, ~97k writes in 100 s,
-audio renders). **King's Valley 1 (16 KB, PSG only) now works end to end without a profile**: it boots,
+audio renders) and also records straight from the capture dialog (13.4k writes, 5.7k of them pitch,
+in 15 s). **King's Valley 1 (16 KB, PSG only) now works end to end without a profile**: it boots,
 the joystick trigger starts the game, and the capture contains its music (verified: 394 pitch writes
 in 30 s, notes visible in the piano roll). Two bugs made this possible: the boot skipped `H.STKE`, and
 the hook used to be *restarted* when a frame overran the instruction budget instead of continuing —
