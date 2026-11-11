@@ -141,18 +141,22 @@ dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
 # screenshot for docs/CI
 MSXAUDIO_SHOT=shot.png MSXAUDIO_SHOT_FRAME=200 dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
 
-# record a GIF with the built-in encoder (no ffmpeg needed), 640×360
+# record a GIF with the built-in encoder (no ffmpeg needed), 640×360 — GIF is silent by format
 MsxAudioVisualizer music/stage_a.vgm --record out.gif --seconds 10 --fps 15
 
-# record an MP4 through ffmpeg (falls back to the PNG sequence when ffmpeg is missing)
+# record an MP4 **with audio**: the same samples that are heard go to out.wav and ffmpeg muxes
+# frames + WAV (without ffmpeg the frames and the WAV are kept and the exact command is printed)
 MsxAudioVisualizer music/stage_a.vgm --record out.mp4 --seconds 20 --fps 30
+
+# audio only (no window): renders the segment to a WAV using the same chips/profile
+MsxAudioVisualizer music/stage_a.vgm --audio-only out.wav --seconds 30 --profile remaster
 
 # window size
 MsxAudioVisualizer music/stage_a.vgm --width 1600 --height 900
 ```
 
 Recording is **deterministic**: every frame advances exactly `1/fps` seconds of music, independent of
-the machine frame rate.
+the machine frame rate — so the WAV timeline matches the video exactly.
 
 ## The `.msxaudio` format
 
@@ -300,7 +304,7 @@ profiles/                             per-game extraction profiles (JSON)
    hardware cadence (then loop detection works and no external emulator is needed).
 2. A `play` CLI command that streams through `MsxAudioEngine` (live preview).
 3. Optional `SoundEffect`-based player for projects that cannot use `DynamicSoundEffectInstance`.
-4. Video export with audio (WAV render + ffmpeg mux) in the visualizer.
+4. Per-channel note history (piano roll) and richer spectrum labels in the visualizer.
 
 ## Tests
 

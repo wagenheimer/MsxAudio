@@ -72,6 +72,7 @@ public sealed class VisualizerGame : Game
     private bool _paused;
     private bool _autoNext = true;
     private bool _showHelp;
+    private readonly AudioProfile _profile;
     private string _status = string.Empty;
     private float _statusTimer;
 
@@ -96,11 +97,14 @@ public sealed class VisualizerGame : Game
     private int _recordFrame;
     private int _recordTotal;
     private GifEncoder? _gif;
+    private WavWriter? _wav;
+    private string? _wavPath;
     private int _gifWidth, _gifHeight, _gifFactor = 1;
 
     public VisualizerGame(string? file, string? recordPath = null, int recordSeconds = 10, int recordFps = 30,
-        int windowWidth = VW, int windowHeight = VH)
+        int windowWidth = VW, int windowHeight = VH, AudioProfile? profile = null)
     {
+        _profile = profile ?? AudioProfile.Stereo;
         _graphics = new GraphicsDeviceManager(this)
         {
             PreferredBackBufferWidth = Math.Max(640, windowWidth),
@@ -150,6 +154,12 @@ public sealed class VisualizerGame : Game
                 _gifFactor = Math.Max(1, VW / _gifWidth);
                 _gif = new GifEncoder(_recordPath, _gifWidth, _gifHeight, _recordFps);
             }
+            else
+            {
+                // Video with audio: the same samples that are heard go to a WAV next to the output,
+                // then ffmpeg muxes frames + WAV (see TryEncode).
+                _wavPath = Path.ChangeExtension(Path.GetFullPath(_recordPath), ".wav");
+            }
         }
 
         ScanTracks(_startDir);
@@ -159,7 +169,8 @@ public sealed class VisualizerGame : Game
         else if (_tracks.Count > 0)
             LoadTrack(0);
 
-        // Recording starts with audio already flowing, so the first frame is not empty.
+        // Recording starts with audio already flowing, so the first frame is not empty. This chunk
+        // belongs to the interval *before* frame 0, so it is not written to the WAV.
         if (_recording && _player is not null)
         {
             int remaining = Math.Max(1, 48000 / _recordFps);
@@ -172,6 +183,9 @@ public sealed class VisualizerGame : Game
 
             UpdateSpectrum();
             UpdateMeters(1f / _recordFps);
+
+            if (_wavPath is not null)
+                _wav = new WavWriter(_wavPath, 48000, 2);
         }
     }
 
@@ -223,7 +237,7 @@ public sealed class VisualizerGame : Game
             _player?.Dispose();
             _sound?.Dispose();
 
-            _player = new VgmPlayer(vgm, loop: true, sampleRate: 48000, oversample: 4, AudioProfile.Stereo);
+            _player = new VgmPlayer(vgm, loop: true, sampleRate: 48000, oversample: _profile.Oversample, profile: _profile);
 
             if (!_recording)
             {
@@ -1029,20 +1043,27 @@ public sealed class VisualizerGame : Game
             SavePng(Path.Combine(_recordDir, $"frame_{_recordFrame:D5}.png"));
         }
 
+        // Audio for this frame's interval: exactly 1/fps of music, so the WAV matches the video.
+        AdvanceAudio(recorded: true);
+
         _recordFrame++;
 
         if (_recordFrame >= _recordTotal)
-        {
             FinishRecording();
-            return;
-        }
+    }
 
-        // Advance the music by exactly one video frame (deterministic, no dropped frames).
+    private void AdvanceAudio(bool recorded)
+    {
+        if (_player is null)
+            return;
+
         int remaining = Math.Max(1, 48000 / _recordFps);
         while (remaining > 0)
         {
             int chunk = Math.Min(2048, remaining);
             _player.Render(_render, chunk);
+            if (recorded)
+                _wav?.Write(_render, chunk);
             remaining -= chunk;
         }
 
@@ -1052,6 +1073,9 @@ public sealed class VisualizerGame : Game
 
     private void FinishRecording()
     {
+        _wav?.Dispose();
+        _wav = null;
+
         if (_gif is not null)
         {
             _gif.Save();
@@ -1061,10 +1085,14 @@ public sealed class VisualizerGame : Game
             return;
         }
 
-        Console.WriteLine($"[Visualizer] {_recordFrame} frames em {_recordDir}");
+        Console.WriteLine($"[Visualizer] {_recordFrame} frames in {_recordDir}");
 
         if (_recordPath is not null && TryEncode(_recordPath))
             Console.WriteLine($"[Visualizer] recording written: {_recordPath}");
+        else if (_wavPath is not null)
+            Console.WriteLine($"[Visualizer] ffmpeg not found: frames in {_recordDir} + audio in {_wavPath}\n" +
+                              $"              ffmpeg -framerate {_recordFps} -i \"{Path.Combine(_recordDir, "frame_%05d.png")}\" " +
+                              $"-i \"{_wavPath}\" -c:v libx264 -pix_fmt yuv420p -crf 20 -c:a aac -b:a 192k -shortest \"{_recordPath}\"");
         else
             Console.WriteLine("[Visualizer] ffmpeg not found: use the PNG sequence above to build the video");
 
@@ -1074,13 +1102,17 @@ public sealed class VisualizerGame : Game
     private bool TryEncode(string output)
     {
         string input = Path.Combine(_recordDir, "frame_%05d.png");
+        string audio = string.Empty;
+        if (_wavPath is not null && File.Exists(_wavPath))
+            audio = $"-i \"{_wavPath}\" -c:a aac -b:a 192k -shortest ";
+
         string ext = Path.GetExtension(output).ToLowerInvariant();
         string args = ext switch
         {
             ".gif" =>
                 $"-y -framerate {_recordFps} -i \"{input}\" -vf \"fps={Math.Min(30, _recordFps)},scale=960:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse\" -loop 0 \"{output}\"",
             _ =>
-                $"-y -framerate {_recordFps} -i \"{input}\" -c:v libx264 -pix_fmt yuv420p -crf 20 \"{output}\"",
+                $"-y -framerate {_recordFps} -i \"{input}\" {audio}-c:v libx264 -pix_fmt yuv420p -crf 20 \"{output}\"",
         };
 
         try
