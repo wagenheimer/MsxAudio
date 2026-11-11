@@ -101,11 +101,11 @@ public sealed partial class VisualizerGame : Game
             FlushAudio();
         }
 
-        if (Pressed(Keys.P) && _player is not null)
-            _player.PsgEnabled = !_player.PsgEnabled;
+        if (Pressed(Keys.P))
+            ToggleChip(true);
 
-        if (Pressed(Keys.S) && _player is not null)
-            _player.SccEnabled = !_player.SccEnabled;
+        if (Pressed(Keys.S))
+            ToggleChip(false);
 
         for (int i = 0; i < 8; i++)
         {
@@ -154,6 +154,8 @@ public sealed partial class VisualizerGame : Game
             if (_loopHit.Contains(p)) { ToggleLoop(); return; }
             if (_aHit.Contains(p)) { MarkLoopA(); return; }
             if (_bHit.Contains(p)) { MarkLoopB(); return; }
+            if (_psgHit.Contains(p)) { ToggleChip(true); return; }
+            if (_sccHit.Contains(p)) { ToggleChip(false); return; }
         }
 
         // Playlist: the wheel scrolls without changing the track; the scrollbar is draggable.

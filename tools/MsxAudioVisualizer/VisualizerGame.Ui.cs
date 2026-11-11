@@ -209,7 +209,7 @@ public sealed partial class VisualizerGame : Game
     }
 
     // Transport bar (design coordinates, set in DrawFooter).
-    private Rectangle _prevHit, _playHit, _nextHit, _loopHit, _volHit, _aHit, _bHit;
+    private Rectangle _prevHit, _playHit, _nextHit, _loopHit, _volHit, _aHit, _bHit, _psgHit, _sccHit;
     private bool _volumeDragging;
 
     private void DrawFooter()
@@ -250,16 +250,23 @@ public sealed partial class VisualizerGame : Game
         DrawButton(_bHit, "B", _player?.LoopB is not null, Accent);
         x += 26 + 22 + 22;
 
+        // Per-chip toggles: exactly the same as the P / S keys, but visible and clickable.
+        _psgHit = new Rectangle(x, y, 34, 18);
+        DrawButton(_psgHit, "PSG", _player?.PsgEnabled ?? true, PsgColor);
+        _sccHit = new Rectangle(x + 38, y, 34, 18);
+        DrawButton(_sccHit, "SCC", _player?.SccEnabled ?? true, SccColor);
+        x += 38 + 34 + 22;
+
         var p = _player;
         if (p is not null)
         {
-            string state = $"PSG {(p.PsgEnabled ? "ON" : "OFF")}   SCC {(p.SccEnabled ? "ON" : "OFF")}";
-            if (p.SoloChannel is int solo)
-                state += "   SOLO " + ChannelName(solo);
-            if (p.LoopA is double a && p.LoopB is double b)
-                state += $"   A-B {FormatTime(a)}-{FormatTime(b)}";
+            string state = p.SoloChannel is int solo ? "SOLO " + ChannelName(solo) : string.Empty;
 
-            Text(state, x, y + 6, TextColor);
+            if (p.LoopA is double a && p.LoopB is double b)
+                state += (state.Length > 0 ? "   " : "") + $"A-B {FormatTime(a)}-{FormatTime(b)}";
+
+            if (state.Length > 0)
+                Text(state, x, y + 6, TextColor);
         }
 
         const string hint = "H HELP";
@@ -309,6 +316,22 @@ public sealed partial class VisualizerGame : Game
         _settings.Save();
 
         _status = _loopEnabled ? "LOOP ON" : "LOOP OFF";
+        _statusTimer = 2f;
+    }
+
+    private void ToggleChip(bool psg)
+    {
+        if (_player is null)
+            return;
+
+        if (psg)
+            _player.PsgEnabled = !_player.PsgEnabled;
+        else
+            _player.SccEnabled = !_player.SccEnabled;
+
+        _status = psg
+            ? (_player.PsgEnabled ? "PSG ON" : "PSG OFF")
+            : (_player.SccEnabled ? "SCC ON" : "SCC OFF");
         _statusTimer = 2f;
     }
 
@@ -397,7 +420,7 @@ public sealed partial class VisualizerGame : Game
             "H              THIS HELP",
             "ESC            CLOSE DIALOG / QUIT",
             "",
-            "FOOTER: PREV / PLAY-PAUSE / NEXT / LOOP / VOLUME",
+            "FOOTER: PREV / PLAY-PAUSE / NEXT / LOOP / VOLUME / PSG-SCC",
             "",
             "PIANO: CLICK AND HOLD A KEY TO PLAY THE SELECTED",
             "CHANNEL'S INSTRUMENT (WORKS WHILE PAUSED); RELEASE",

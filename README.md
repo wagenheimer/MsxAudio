@@ -145,9 +145,9 @@ In the **piano** view:
 What you see:
 
 - **POSITION** bar with `current / total`, the loop window and a marker — click or drag to seek;
-- the **transport bar** at the bottom: previous / play-pause / next, **LOOP**, **volume** and the
-  **A-B loop** (its A/B points also appear on the POSITION bar). The track list scrolls with the
-  wheel, `PgUp`/`PgDn` or its draggable scrollbar;
+- the **transport bar** at the bottom: previous / play-pause / next, **LOOP**, **volume**, the
+  **A-B loop** (its A/B points also appear on the POSITION bar) and the **PSG / SCC** chip toggles.
+  The track list scrolls with the wheel, `PgUp`/`PgDn` or its draggable scrollbar;
 - **SPECTRUM** in **dB** (`0` to `-60 dB`) with a frequency axis at **100 Hz / 1 kHz / 10 kHz** and
   **peak-hold caps**, so the quiet harmonics and short transients stay visible;
 - **PIANO ROLL**: the last 12 s with a **mini keyboard** on the left, octave lines, time grid, one
@@ -159,8 +159,8 @@ What you see:
   auditions that instrument — the same PSG envelope/ noise and SCC wave the song uses, mixed over the
   music. The note lasts as long as the mouse button is held. **Mute/solo also apply here**: a muted
   channel (or one filtered out by solo) stops lighting its keys and fades its selector, so the
-  keyboard shows exactly what is being heard. Selecting the **PSG profile** (`O`) or pressing `S`
-  turns the SCC off for a PSG-only listen;
+  keyboard shows exactly what is being heard. The footer has **PSG / SCC** buttons (same as the
+  `P` / `S` keys) to mute a chip;
 - the **MASTER** oscilloscope and the per-channel scopes draw a **min/max envelope** per pixel column,
   so peaks stay visible instead of being averaged away;
 - one strip per channel with live oscilloscope, volume, level with **peak hold**, frequency, nearest
@@ -287,7 +287,7 @@ MsxAudioTool import <vgm-folder> <out.msxaudio> [--title T] [--clips]
 MsxAudioTool info <package.msxaudio>
 MsxAudioTool extract <rom> <out.msxaudio> --profile profile.json [--openmsx path]
 MsxAudioTool extract-direct <rom> <out.msxaudio> --profile profile.json
-MsxAudioTool render <package.msxaudio> <id|all> <out.wav> [--profile original|stereo|remaster|psg]
+MsxAudioTool render <package.msxaudio> <id|all> <out.wav> [--profile original|stereo|remaster]
 MsxAudioTool verify <vgm> <capture.wav>
 MsxAudioTool unpack <package.msxaudio> <folder>
 ```
@@ -299,11 +299,9 @@ MsxAudioTool unpack <package.msxaudio> <folder>
 | `original` | faithful: all 8 channels centred, only the DC cut |
 | `stereo` | PSG at −30/0/+30 % and SCC at −55/−25/0/+25/+55 % + 16 kHz low-pass |
 | `remaster` | 8× oversampling, wider pan, 17 kHz low-pass, short reverb, peak normalisation |
-| `psg` | **SCC muted**: the PSG channels alone (the mix a machine without the SCC chip plays) |
 
-> The sound engine writes the **same PSG + SCC score on every cartridge**, so "PSG only" is the PSG
-> part of that score, not a separate arrangement — the `psg` profile (or the `S` key in the
-> visualizer) reproduces exactly what a machine without the SCC would hear.
+> Profiles only change **how** the chips are mixed. The chips themselves are toggled with `P` / `S`
+> (or the **PSG / SCC** buttons in the transport bar of the visualizer).
 
 ## Validation
 

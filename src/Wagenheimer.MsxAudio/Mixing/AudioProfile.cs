@@ -81,21 +81,8 @@ public sealed class AudioProfile
         NormalizePeak = 0.89f,
     };
 
-    /// <summary>
-    /// PSG only: the SCC chip is muted. The sound engine writes the same PSG+SCC score on every
-    /// cartridge, so this is the "machine without an SCC" mix (the PSG channels alone), not a
-    /// different arrangement.
-    /// </summary>
-    public static AudioProfile PsgOnly => new()
-    {
-        Name = "psg",
-        Oversample = 4,
-        SccGain = 0f,
-        HighPassHz = 12f,
-    };
-
     /// <summary>Ready-made profiles.</summary>
-    public static AudioProfile[] All => new[] { Original, Stereo, Remaster, PsgOnly };
+    public static AudioProfile[] All => new[] { Original, Stereo, Remaster };
 
     /// <summary>Copy of the profile with another oversampling factor (short effects can use less).</summary>
     public AudioProfile WithOversample(int oversample) => new()
@@ -118,7 +105,6 @@ public sealed class AudioProfile
     {
         "stereo" or "estéreo" => Stereo,
         "remaster" or "master" => Remaster,
-        "psg" or "psgonly" or "psg-only" => PsgOnly,
         _ => Original,
     };
 }

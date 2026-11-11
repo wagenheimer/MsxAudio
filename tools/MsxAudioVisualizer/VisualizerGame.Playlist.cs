@@ -165,8 +165,6 @@ public sealed partial class VisualizerGame : Game
             _player = new VgmPlayer(vgm, loop: true, sampleRate: 48000, oversample: _profile.Oversample, profile: _profile);
             _player.Volume = _volume;
             _player.LoopEnabled = _loopEnabled;
-            _player.PsgEnabled = _profile.PsgGain > 0f;
-            _player.SccEnabled = _profile.SccGain > 0f;
             ApplyStartupMix(_player);
             _songMap = SongMap.Build(vgm, SongMapBuckets);
             _heldKeyMidi = -1;
