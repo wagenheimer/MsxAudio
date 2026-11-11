@@ -30,6 +30,8 @@ internal static class Program
                 "info" => Info(args.Skip(1).ToArray()),
                 "import" => Import(args.Skip(1).ToArray()),
                 "extract" => Extract(args.Skip(1).ToArray()),
+                "extract-direct" => ExtractDirect(args.Skip(1).ToArray()),
+                "probe" => Probe(args.Skip(1).ToArray()),
                 "render" => Render(args.Skip(1).ToArray()),
                 "verify" => Verify(args.Skip(1).ToArray()),
                 "unpack" => Unpack(args.Skip(1).ToArray()),
@@ -130,6 +132,43 @@ internal static class Program
         var result = OpenMsxRomExtractor.Extract(options, Console.WriteLine);
         result.Library.Save(args[1]);
         Console.WriteLine($"{result.Library.Songs.Count} músicas, {result.Library.Clips.Count} efeitos -> {args[1]}");
+        return 0;
+    }
+
+    private static int Probe(string[] args)
+    {
+        if (args.Length < 1) return Usage("probe <rom>");
+
+        byte[] rom = File.ReadAllBytes(args[0]);
+        var machine = new MiniMsx(rom) { TraceWrites = true };
+        Console.WriteLine($"rom {rom.Length} bytes; header INIT={rom[2] | (rom[3] << 8):X4}");
+        Console.WriteLine($"after boot: {machine.Boot()}, PC={machine.Pc:X4}, H.TIMI={machine.InterruptHook:X4}");
+        Console.WriteLine($"high-RAM writes during boot: {machine.Trace.Count}");
+        foreach (var (address, value) in machine.Trace)
+            Console.WriteLine($"  {address:X4} <- {value:X2}");
+
+        for (ushort address = 0xFEDA; address <= 0xFEDC; address++)
+            Console.Write($"{machine.Memory(address):X2} ");
+        Console.WriteLine(" <- H.STKE");
+
+        for (int i = 0; i < 5; i++) machine.Frame();
+        Console.WriteLine($"after 5 frames: H.TIMI={machine.InterruptHook:X4}, PC={machine.Pc:X4}");
+        return 0;
+    }
+
+    private static int ExtractDirect(string[] args)
+    {
+        if (args.Length < 2) return Usage("extract-direct <rom> <out.msxaudio> --profile profile.json");
+
+        string profilePath = Value(args, "--profile") ?? throw new ArgumentException("missing --profile profile.json");
+        var profile = JsonSerializer.Deserialize<RomExtractionProfile>(File.ReadAllText(profilePath),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidDataException("invalid profile");
+
+        var options = new RomExtractionOptions { RomPath = args[0], Profile = profile };
+        var result = DirectRomExtractor.Extract(options, Console.WriteLine);
+        result.Library.Save(args[1]);
+        Console.WriteLine($"{result.Library.Songs.Count} songs, {result.Library.Clips.Count} effects -> {args[1]}");
         return 0;
     }
 

@@ -106,6 +106,19 @@ public sealed class VgmFile
         return Parse(data, Path.GetFileNameWithoutExtension(path));
     }
 
+    /// <summary>Creates a VGM from an in-memory register-write stream (e.g. captured from a driver).</summary>
+    public static VgmFile FromEvents(
+        IEnumerable<VgmEvent> events,
+        long totalSamples,
+        double ayClock = 1789772.5,
+        string name = "capture")
+    {
+        ArgumentNullException.ThrowIfNull(events);
+
+        var list = new List<VgmEvent>(events);
+        return new VgmFile(name, ayClock, totalSamples, list.ToArray());
+    }
+
     /// <summary>LÃª um VGM em memÃ³ria.</summary>
     public static VgmFile Parse(byte[] data, string name = "vgm")
     {

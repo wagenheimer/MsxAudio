@@ -119,8 +119,24 @@ MsxAudioTool extract "King's Valley II (JP)[RC-760].rom" kingsvalley.msxaudio \
 }
 ```
 
-> Músicas com loop longo precisam de captura maior (o `stage_e` do KV2 só revela o loop de 67,287 s
-> com 300 s de gravação). Use `secondsById` para isso.
+> Songs with long loops need longer captures (KV2's `stage_e` only reveals its 67.287 s loop with
+> 300 s of recording). Use `secondsById` for that.
+
+### Direct extraction, no external emulator (experimental)
+
+`extract-direct` runs the **cartridge's own sound driver in process**: a minimal MSX1 machine
+(Z80 core + Konami SCC mapper + 16 KB RAM + PSG/SCC capture + BIOS entry stubs for `RST 30h`,
+`WRTPSG` and `RDPSG`) boots the ROM, installs the interrupt hook and records the register writes
+— no openMSX, no window.
+
+```bash
+MsxAudioTool extract-direct "rom.msx" game.msxaudio --profile profiles/kingsvalley2.json
+```
+
+Status: **works** (it boots King's Valley II, runs the driver, captures ~97k writes in 100 s and
+renders audio), but the VDP vblank flag/status is not modelled yet, so the driver runs ~6% off the
+hardware tempo and the loop is not detected. The `extract` path (openMSX) remains the bit-exact
+reference.
 
 ## CLI
 
