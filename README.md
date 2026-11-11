@@ -104,6 +104,10 @@ toca em tempo real e mostra tudo o que os chips estão fazendo:
 | `H` | ajuda |
 | `Esc` | sai |
 
+Clique na **barra de posição** para pular para um instante (com texto `atual / total` e a janela de
+loop) e no **rótulo do canal** para dar **solo** nele. Cada canal mostra volume, nível com
+**peak hold**, frequência, nota e — nos canais SCC — a **wavetable de 32 amostras**.
+
 A tela mostra: lista de faixas, **espectro** (FFT log), **osciloscópio** do mix, e uma faixa por
 canal (PSG azul, SCC verde) com **mini-osciloscópio**, volume, nível, **frequência** e **nota**.
 Também dá para gerar um PNG por linha de comando (documentação/CI):
@@ -112,6 +116,23 @@ Também dá para gerar um PNG por linha de comando (documentação/CI):
 dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
 MSXAUDIO_SHOT=shot.png MSXAUDIO_SHOT_FRAME=200 dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
 ```
+
+A janela é redimensionável/maximizável (a UI é escalada a partir do canvas 1280x720) e aceita
+tamanho inicial. Para gravar a sessão:
+
+```bash
+# GIF (encoder embutido, sem ffmpeg) — 640x360
+MsxAudioVisualizer music/stage_a.vgm --record out.gif --seconds 10 --fps 15
+
+# MP4 (usa o ffmpeg do PATH; sem ele, deixa a sequência de PNGs)
+MsxAudioVisualizer music/stage_a.vgm --record out.mp4 --seconds 20 --fps 30
+
+# tamanho da janela
+MsxAudioVisualizer music/stage_a.vgm --width 1600 --height 900
+```
+
+A gravação é **determinística**: cada quadro avança exatamente `1/fps` s de música (sem depender
+do framerate da máquina).
 
 ## Extrair de uma ROM
 O extrator dirige o **openMSX** (o emulador faz o trabalho sujo: VDP, CPU, mapper, SCC) e injeta

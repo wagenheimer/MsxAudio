@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using Microsoft.Xna.Framework;
@@ -13,13 +14,17 @@ namespace Wagenheimer.MsxAudio.Visualizer;
 
 /// <summary>
 /// Visual player for MSX VGMs: plays the PSG/SCC in real time and shows the chips, the channels,
-/// the master waveform and the spectrum.
+/// the master waveform, the spectrum and the SCC wave RAM.
 /// </summary>
+/// <remarks>
+/// The UI is laid out on a fixed 1280x720 canvas and scaled to the window, so maximising it keeps
+/// everything aligned. It can also render a PNG sequence (and call ffmpeg to build a GIF/MP4).
+/// </remarks>
 public sealed class VisualizerGame : Game
 {
-    private const int Width = 1280;
-    private const int Height = 720;
-    private const int ChunkFrames = 1024;
+    private const int VW = 1280;
+    private const int VH = 720;
+    private const int ChunkFrames = 2048;
     private const int FftSize = 1024;
     private const int SpectrumBars = 96;
 
@@ -37,10 +42,12 @@ public sealed class VisualizerGame : Game
     private readonly GraphicsDeviceManager _graphics;
     private readonly string? _startFile;
     private readonly string _startDir;
+    private readonly string? _recordPath;
+    private readonly int _recordSeconds;
+    private readonly int _recordFps;
 
     private SpriteBatch _batch = null!;
     private Texture2D _pixel = null!;
-    private SpriteFont? _font;
 
     private readonly List<string> _tracks = new();
     private int _selected;
@@ -54,21 +61,44 @@ public sealed class VisualizerGame : Game
     private readonly float[] _fftMagnitude = new float[FftSize / 2];
     private readonly float[] _fftWindow = Fft.HannWindow(FftSize);
     private readonly float[] _bars = new float[SpectrumBars];
+    private readonly float[] _peakHold = new float[8];
+    private readonly float[] _wave = new float[32];
 
     private KeyboardState _keys;
     private KeyboardState _prevKeys;
+    private MouseState _mouse;
+    private MouseState _prevMouse;
     private bool _paused;
     private bool _autoNext = true;
     private bool _showHelp;
     private string _status = string.Empty;
     private float _statusTimer;
 
-    public VisualizerGame(string? file)
+    // Scaling of the 1280x720 canvas to the window.
+    private float _scale = 1f;
+    private float _offX, _offY;
+
+    // Seek bar (design coordinates, set in DrawSeekBar).
+    private Rectangle _seekBar;
+
+    // Channel strip areas (design coordinates, set in DrawChannels).
+    private readonly Rectangle[] _stripHit = new Rectangle[8];
+
+    // Recording.
+    private bool _recording;
+    private string _recordDir = string.Empty;
+    private int _recordFrame;
+    private int _recordTotal;
+    private GifEncoder? _gif;
+    private int _gifWidth, _gifHeight, _gifFactor = 1;
+
+    public VisualizerGame(string? file, string? recordPath = null, int recordSeconds = 10, int recordFps = 30,
+        int windowWidth = VW, int windowHeight = VH)
     {
         _graphics = new GraphicsDeviceManager(this)
         {
-            PreferredBackBufferWidth = Width,
-            PreferredBackBufferHeight = Height,
+            PreferredBackBufferWidth = Math.Max(640, windowWidth),
+            PreferredBackBufferHeight = Math.Max(360, windowHeight),
             SynchronizeWithVerticalRetrace = true,
         };
 
@@ -81,6 +111,10 @@ public sealed class VisualizerGame : Game
         _startDir = file is not null
             ? Path.GetDirectoryName(Path.GetFullPath(file)) ?? "."
             : Directory.GetCurrentDirectory();
+
+        _recordPath = recordPath;
+        _recordSeconds = Math.Max(1, recordSeconds);
+        _recordFps = Math.Clamp(recordFps, 5, 60);
     }
 
     protected override void Initialize()
@@ -93,12 +127,58 @@ public sealed class VisualizerGame : Game
                 LoadFile(e.Files[0]);
         };
 
+        Window.ClientSizeChanged += (_, _) => ApplyWindowSize();
+
+        if (!string.IsNullOrWhiteSpace(_recordPath))
+        {
+            _recording = true;
+            _recordTotal = _recordSeconds * _recordFps;
+            _recordDir = Path.Combine(Path.GetTempPath(), "msxaudio_vis_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(_recordDir);
+
+            // GIF: encoded in-process (no ffmpeg), at half resolution to keep the file small.
+            if (Path.GetExtension(_recordPath).Equals(".gif", StringComparison.OrdinalIgnoreCase))
+            {
+                _gifWidth = VW / 2;
+                _gifHeight = VH / 2;
+                _gifFactor = Math.Max(1, _graphics.PreferredBackBufferWidth / _gifWidth);
+                _gif = new GifEncoder(_recordPath, _gifWidth, _gifHeight, _recordFps);
+            }
+        }
+
         ScanTracks(_startDir);
 
         if (_startFile is not null && File.Exists(_startFile))
             LoadFile(_startFile);
         else if (_tracks.Count > 0)
             LoadTrack(0);
+
+        // Recording starts with audio already flowing, so the first frame is not empty.
+        if (_recording && _player is not null)
+        {
+            int remaining = Math.Max(1, 48000 / _recordFps);
+            while (remaining > 0)
+            {
+                int chunk = Math.Min(2048, remaining);
+                _player.Render(_render, chunk);
+                remaining -= chunk;
+            }
+
+            UpdateSpectrum();
+            UpdateMeters(1f / _recordFps);
+        }
+    }
+
+    private void ApplyWindowSize()
+    {
+        int w = Math.Max(320, Window.ClientBounds.Width);
+        int h = Math.Max(200, Window.ClientBounds.Height);
+        if (_graphics.PreferredBackBufferWidth == w && _graphics.PreferredBackBufferHeight == h)
+            return;
+
+        _graphics.PreferredBackBufferWidth = w;
+        _graphics.PreferredBackBufferHeight = h;
+        _graphics.ApplyChanges();
     }
 
     protected override void LoadContent()
@@ -137,8 +217,13 @@ public sealed class VisualizerGame : Game
             _sound?.Dispose();
 
             _player = new VgmPlayer(vgm, loop: true, sampleRate: 48000, oversample: 4, AudioProfile.Stereo);
-            _sound = new DynamicSoundEffectInstance(48000, AudioChannels.Stereo);
-            _sound.Play();
+
+            if (!_recording)
+            {
+                _sound = new DynamicSoundEffectInstance(48000, AudioChannels.Stereo);
+                _sound.Play();
+            }
+
             _paused = false;
 
             var folder = Path.GetDirectoryName(path) ?? ".";
@@ -153,6 +238,7 @@ public sealed class VisualizerGame : Game
             _status = "LOADED " + Path.GetFileName(path);
             _statusTimer = 3f;
             Array.Clear(_bars);
+            Array.Clear(_peakHold);
         }
         catch (Exception ex)
         {
@@ -166,22 +252,41 @@ public sealed class VisualizerGame : Game
     {
         _prevKeys = _keys;
         _keys = Keyboard.GetState();
+        _prevMouse = _mouse;
+        _mouse = Mouse.GetState();
 
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
         if (_statusTimer > 0) _statusTimer -= dt;
 
         HandleInput();
 
-        if (_player is not null && _sound is not null && !_paused)
+        if (_player is not null && !_recording)
         {
-            if (_player.Finished && _autoNext && _tracks.Count > 0)
-                LoadTrack((_selected + 1) % _tracks.Count);
+            UpdateMeters(dt);
 
-            Feed();
+            if (!_paused)
+            {
+                if (_player.Finished && _autoNext && _tracks.Count > 0)
+                    LoadTrack((_selected + 1) % _tracks.Count);
+
+                Feed();
+            }
         }
 
         UpdateSpectrum();
         base.Update(gameTime);
+    }
+
+    private void UpdateMeters(float dt)
+    {
+        if (_player is null)
+            return;
+
+        for (int i = 0; i < 8; i++)
+        {
+            float level = _player.Channels[i].Level;
+            _peakHold[i] = Math.Max(level, _peakHold[i] - dt * 0.35f);
+        }
     }
 
     private void Feed()
@@ -207,6 +312,12 @@ public sealed class VisualizerGame : Game
     }
 
     private bool Pressed(Keys key) => _keys.IsKeyDown(key) && !_prevKeys.IsKeyDown(key);
+
+    private Point MouseDesign()
+    {
+        if (_scale <= 0) return Point.Zero;
+        return new Point((int)((_mouse.X - _offX) / _scale), (int)((_mouse.Y - _offY) / _scale));
+    }
 
     private void HandleInput()
     {
@@ -277,7 +388,45 @@ public sealed class VisualizerGame : Game
             _status = _autoNext ? "AUTO NEXT ON" : "AUTO NEXT OFF";
             _statusTimer = 2f;
         }
+
+        HandleMouse();
     }
+
+    private void HandleMouse()
+    {
+        if (_player is null)
+            return;
+
+        bool down = _mouse.LeftButton == ButtonState.Pressed;
+        bool pressed = down && _prevMouse.LeftButton == ButtonState.Released;
+        var p = MouseDesign();
+
+        // Seek bar: click or drag.
+        if (down && _seekBar.Width > 0 && _seekBar.Contains(p))
+        {
+            double t = (p.X - _seekBar.Left) / (double)_seekBar.Width * _player.TotalSeconds;
+            _player.Seek(Math.Clamp(t, 0, _player.TotalSeconds));
+            if (pressed) FlushAudio();
+            return;
+        }
+
+        // Channel strip header: solo.
+        if (pressed)
+        {
+            for (int ch = 0; ch < 8; ch++)
+            {
+                if (_stripHit[ch].Contains(p))
+                {
+                    _player.SoloChannel = _player.SoloChannel == ch ? null : ch;
+                    _status = _player.SoloChannel is int s ? $"SOLO {ChannelName(s)}" : "SOLO OFF";
+                    _statusTimer = 2f;
+                    return;
+                }
+            }
+        }
+    }
+
+    private static string ChannelName(int ch) => ch < 3 ? $"PSG{ch + 1}" : $"SCC{ch - 2}";
 
     private void CycleProfile()
     {
@@ -320,7 +469,6 @@ public sealed class VisualizerGame : Game
 
         Fft.Magnitude(_fftSamples, _fftMagnitude, _fftWindow);
 
-        // Log-spaced bars (bass on the left).
         int bins = _fftMagnitude.Length;
         for (int b = 0; b < SpectrumBars; b++)
         {
@@ -342,9 +490,18 @@ public sealed class VisualizerGame : Game
     protected override void Draw(GameTime gameTime)
     {
         GraphicsDevice.Clear(Background);
-        _batch.Begin(samplerState: SamplerState.PointClamp);
+
+        int w = GraphicsDevice.PresentationParameters.BackBufferWidth;
+        int h = GraphicsDevice.PresentationParameters.BackBufferHeight;
+        _scale = Math.Min(w / (float)VW, h / (float)VH);
+        _offX = (w - VW * _scale) / 2f;
+        _offY = (h - VH * _scale) / 2f;
+
+        _batch.Begin(samplerState: SamplerState.PointClamp,
+            transformMatrix: Matrix.CreateScale(_scale) * Matrix.CreateTranslation(_offX, _offY, 0f));
 
         DrawHeader();
+        DrawSeekBar();
         DrawPlaylist();
 
         if (_player is not null)
@@ -365,52 +522,18 @@ public sealed class VisualizerGame : Game
 
         _batch.End();
         base.Draw(gameTime);
-        TryScreenshot();
-    }
 
-    // ── Gate de screenshot (docs/CI): MSXAUDIO_SHOT=<png> + MSXAUDIO_SHOT_FRAME=<n> ───────────
-    private int _frame;
-    private bool _shotDone;
-
-    private void TryScreenshot()
-    {
-        if (_shotDone)
-            return;
-
-        _frame++;
-        string? path = Environment.GetEnvironmentVariable("MSXAUDIO_SHOT");
-        if (string.IsNullOrWhiteSpace(path))
-            return;
-
-        int target = int.TryParse(Environment.GetEnvironmentVariable("MSXAUDIO_SHOT_FRAME"), out int f) ? f : 90;
-        if (_frame < target)
-            return;
-
-        _shotDone = true;
-        try
-        {
-            var data = new Color[GraphicsDevice.PresentationParameters.BackBufferWidth *
-                                 GraphicsDevice.PresentationParameters.BackBufferHeight];
-            GraphicsDevice.GetBackBufferData(data);
-
-            using var texture = new Texture2D(GraphicsDevice,
-                GraphicsDevice.PresentationParameters.BackBufferWidth,
-                GraphicsDevice.PresentationParameters.BackBufferHeight);
-            texture.SetData(data);
-            using var stream = File.Create(path);
-            texture.SaveAsPng(stream, texture.Width, texture.Height);
-            Console.WriteLine($"[Visualizer] screenshot: {path}");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[Visualizer] screenshot falhou: {ex.Message}");
-        }
-
-        Exit();
+        if (_recording)
+            CaptureFrame();
+        else
+            TryScreenshot();
     }
 
     private void Rect(int x, int y, int w, int h, Color color) =>
-        _batch.Draw(_pixel, new Rectangle(x, y, w, h), color);
+        _batch.Draw(_pixel, new Rectangle(x, y, Math.Max(1, w), Math.Max(1, h)), color);
+
+    private void Rect(Rectangle r, Color color) =>
+        _batch.Draw(_pixel, r, color);
 
     private void Panel(int x, int y, int w, int h, Color? fill = null)
     {
@@ -426,8 +549,8 @@ public sealed class VisualizerGame : Game
 
     private void DrawHeader()
     {
-        Rect(0, 0, Width, 46, PanelHi);
-        Rect(0, 45, Width, 1, Grid);
+        Rect(0, 0, VW, 46, PanelHi);
+        Rect(0, 45, VW, 1, Grid);
 
         Text("MSX AUDIO VISUALIZER", 16, 12, Accent, 2);
         Text("PSG AY-3-8910 + KONAMI SCC", 16, 30, Dim);
@@ -438,10 +561,10 @@ public sealed class VisualizerGame : Game
             Text(name, 360, 16, TextColor, 2);
 
             string time = $"{FormatTime(_player.Time)} / {FormatTime(_player.TotalSeconds)}";
-            Text(time, Width - 16 - PixelFont.Measure(time), 12, TextColor, 2);
+            Text(time, VW - 16 - PixelFont.Measure(time), 12, TextColor, 2);
 
-            string info = $"PSG {(int)(_player.Song.AyClock / 1000)}KHZ  SCC {(int)(1789772.5 / 1000)}KHZ  OUT {(int)(48000 / 1000)}KHZ  X{_player.Oversample}  {_player.Profile.Name.ToUpperInvariant()}";
-            Text(info, Width - 16 - PixelFont.Measure(info), 30, Dim);
+            string info = $"PSG {(int)(_player.Song.AyClock / 1000)}KHZ  SCC {(int)(1789772.5 / 1000)}KHZ  OUT 48KHZ  X{_player.Oversample}  {_player.Profile.Name.ToUpperInvariant()}";
+            Text(info, VW - 16 - PixelFont.Measure(info), 30, Dim);
         }
     }
 
@@ -452,15 +575,52 @@ public sealed class VisualizerGame : Game
         return $"{total / 60:00}:{total % 60:00}";
     }
 
+    private void DrawSeekBar()
+    {
+        const int x = 336, y = 52, w = VW - 348, h = 44;
+        Panel(x, y, w, h);
+        Text("POSITION", x + 10, y + 6, Accent);
+
+        int barX = x + 10, barY = y + 24, barW = w - 20, barH = 10;
+        _seekBar = new Rectangle(barX, barY - 4, barW, barH + 8);
+
+        Rect(barX, barY, barW, barH, Grid);
+
+        if (_player is null)
+            return;
+
+        double total = Math.Max(0.001, _player.TotalSeconds);
+        double time = Math.Clamp(_player.Time, 0, total);
+        int filled = (int)(barW * time / total);
+
+        Rect(barX, barY, filled, barH, PsgColor);
+
+        // Loop window (start..end) when the VGM exposes it.
+        var song = _player.Song;
+        if (song.HasLoop)
+        {
+            int lx = barX + (int)(barW * (song.LoopStartSeconds / total));
+            int lw = Math.Max(2, (int)(barW * (song.LoopSeconds / total)));
+            Rect(lx, barY - 3, lw, 3, Accent);
+        }
+
+        // Marker.
+        int mx = barX + filled;
+        Rect(mx - 1, barY - 4, 3, barH + 8, Accent);
+
+        string text = $"{FormatTime(time)} / {FormatTime(total)}";
+        Text(text, x + w - 10 - PixelFont.Measure(text), y + 6, TextColor);
+    }
+
     private void DrawPlaylist()
     {
-        const int x = 12, y = 58, w = 316, h = 600;
+        const int x = 12, y = 52, w = 316, h = 614;
         Panel(x, y, w, h);
 
         Text("TRACKS", x + 10, y + 8, Accent);
         Rect(x + 10, y + 24, w - 20, 1, Grid);
 
-        int rows = (h - 40) / 18;
+        int rows = (h - 90) / 18;
         int first = Math.Max(0, Math.Min(_selected - rows / 2, Math.Max(0, _tracks.Count - rows)));
 
         for (int i = 0; i < rows && first + i < _tracks.Count; i++)
@@ -474,7 +634,7 @@ public sealed class VisualizerGame : Game
 
             string name = Path.GetFileNameWithoutExtension(_tracks[index]).ToUpperInvariant();
             if (name.Length > 30) name = name[..30];
-            Text(name, x + 12, rowY, active ? Accent : (index == _selected ? TextColor : Dim));
+            Text(name, x + 12, rowY, active ? Accent : Dim);
         }
 
         if (_tracks.Count == 0)
@@ -492,14 +652,14 @@ public sealed class VisualizerGame : Game
 
     private void DrawEmpty()
     {
-        Panel(336, 58, Width - 348, 600);
+        Panel(336, 52, VW - 348, 616);
         Text("DROP A .VGM FILE OR PASS A FOLDER AS THE FIRST ARGUMENT", 368, 330, Dim);
-        Text("MSXAUDIOVISUALIZER <FILE.VGM | FOLDER>", 368, 350, Dim);
+        Text("MSXAUDIOVISUALIZER <FILE.VGM | FOLDER> [--RECORD OUT.GIF --SECONDS 10]", 368, 350, Dim);
     }
 
     private void DrawSpectrum()
     {
-        const int x = 336, y = 58, w = Width - 348, h = 196;
+        const int x = 336, y = 104, w = VW - 348, h = 182;
         Panel(x, y, w, h);
         Text("SPECTRUM", x + 10, y + 6, Accent);
 
@@ -524,7 +684,7 @@ public sealed class VisualizerGame : Game
 
     private void DrawScope()
     {
-        const int x = 336, y = 262, w = Width - 348, h = 150;
+        const int x = 336, y = 292, w = VW - 348, h = 138;
         Panel(x, y, w, h);
         Text("MASTER", x + 10, y + 6, Accent);
 
@@ -543,11 +703,7 @@ public sealed class VisualizerGame : Game
             py = Math.Clamp(py, top, top + innerH - 1);
 
             if (prevY >= 0)
-            {
-                int from = Math.Min(prevY, py);
-                int to = Math.Max(prevY, py);
-                Rect(left + i, from, 1, Math.Max(1, to - from), PsgColor);
-            }
+                Rect(left + i, Math.Min(prevY, py), 1, Math.Max(1, Math.Abs(py - prevY)), PsgColor);
 
             prevY = py;
         }
@@ -555,9 +711,10 @@ public sealed class VisualizerGame : Game
 
     private void DrawChannels()
     {
-        const int x = 336, y = 420, w = Width - 348, h = 238;
+        const int x = 336, y = 436, w = VW - 348, h = 230;
         Panel(x, y, w, h);
         Text("CHANNELS", x + 10, y + 6, Accent);
+        Text("CLICK THE LABEL FOR SOLO", x + 110, y + 6, Dim);
 
         int stripW = (w - 20) / 8;
         int stripY = y + 24;
@@ -569,19 +726,26 @@ public sealed class VisualizerGame : Game
             bool isPsg = ch < 3;
             bool chipOn = isPsg ? _player.PsgEnabled : _player.SccEnabled;
             bool muted = _player.ChannelMuted[ch];
+            bool soloed = _player.SoloChannel == ch;
+            bool audible = !muted && chipOn && (_player.SoloChannel is null || soloed);
+
             var color = isPsg ? PsgColor : SccColor;
-            if (muted || !chipOn) color = Dim;
+            if (!audible) color = Dim;
 
             int sx = x + 10 + ch * stripW;
+            _stripHit[ch] = new Rectangle(sx + 2, stripY, stripW - 4, 22);
+
             Panel(sx + 2, stripY, stripW - 4, stripH, PanelHi);
 
             Text(isPsg ? $"PSG{info.Number}" : $"SCC{info.Number}", sx + 8, stripY + 6, color);
 
-            if (muted || !chipOn)
-                Text("OFF", sx + stripW - 34, stripY + 6, Warn);
+            if (soloed)
+                Text("SOLO", sx + stripW - 38, stripY + 6, Accent);
+            else if (!audible)
+                Text("OFF", sx + stripW - 30, stripY + 6, Warn);
 
-            // Mini scope.
-            int scopeX = sx + 8, scopeY = stripY + 22, scopeW = stripW - 16, scopeH = 70;
+            // Live mini scope.
+            int scopeX = sx + 8, scopeY = stripY + 24, scopeW = stripW - 16, scopeH = 46;
             Rect(scopeX, scopeY + scopeH / 2, scopeW, 1, Grid);
 
             var ring = _player.ChannelScope(ch);
@@ -599,28 +763,44 @@ public sealed class VisualizerGame : Game
                 prevY = py;
             }
 
+            // SCC wave RAM (32 samples).
+            if (!isPsg)
+            {
+                int waveY = stripY + 74, waveH = 20;
+                Rect(scopeX, waveY + waveH / 2, scopeW, 1, Grid);
+                _player.CopySccWave(ch - 3, _wave);
+
+                int stepX = Math.Max(1, scopeW / 32);
+                for (int i = 0; i < 32; i++)
+                {
+                    int px = scopeX + i * stepX;
+                    int py = waveY + waveH / 2 - (int)(_wave[i] * waveH / 2);
+                    py = Math.Clamp(py, waveY, waveY + waveH - 1);
+                    Rect(px, Math.Min(py, waveY + waveH / 2), Math.Max(1, stepX - 1),
+                        Math.Max(1, Math.Abs(py - (waveY + waveH / 2))), color);
+                }
+            }
+
             // Volume bar.
-            int volX = sx + stripW - 16, volY = stripY + 22, volH = 70;
+            int volX = sx + stripW - 16, volY = stripY + 24, volH = 70;
             Rect(volX, volY, 6, volH, Grid);
             int vol = (int)(info.Volume * volH);
             Rect(volX, volY + volH - vol, 6, vol, color);
 
-            // Level bar.
-            int levelY = stripY + 100, levelW = stripW - 16;
-            Rect(scopeX, levelY, levelW, 5, Grid);
-            Rect(scopeX, levelY, (int)(Math.Clamp(info.Level * 3f, 0, 1) * levelW), 5, color);
+            // Level bar + peak hold.
+            int levelY = stripY + 104, levelW = stripW - 16;
+            Rect(scopeX, levelY, levelW, 6, Grid);
+            Rect(scopeX, levelY, (int)(Math.Clamp(info.Level * 3f, 0, 1) * levelW), 6, color);
 
-            // Frequency / note.
+            int peakX = scopeX + (int)(Math.Clamp(_peakHold[ch] * 3f, 0, 1) * levelW);
+            Rect(Math.Min(peakX, scopeX + levelW - 2), levelY - 2, 2, 10, Accent);
+
             string freq = info.Frequency >= 1000
                 ? $"{info.Frequency / 1000:0.0}K"
                 : $"{info.Frequency:0}HZ";
-            Text(freq, sx + 8, stripY + 112, info.Key ? TextColor : Dim);
-
-            string note = NoteName(info.Frequency);
-            Text(note, sx + 8, stripY + 126, info.Key ? Accent : Dim);
-
-            string key = info.Key ? "KEY" : "---";
-            Text(key, sx + 8, stripY + 140, info.Key ? color : Dim);
+            Text(freq, sx + 8, stripY + 120, info.Key ? TextColor : Dim);
+            Text(NoteName(info.Frequency), sx + 8, stripY + 134, info.Key ? Accent : Dim);
+            Text(info.Key ? "KEY" : "---", sx + 8, stripY + 148, info.Key ? color : Dim);
         }
     }
 
@@ -638,27 +818,27 @@ public sealed class VisualizerGame : Game
 
     private void DrawFooter()
     {
-        Rect(0, Height - 40, Width, 40, PanelHi);
-        Rect(0, Height - 40, Width, 1, Grid);
+        Rect(0, VH - 40, VW, 40, PanelHi);
+        Rect(0, VH - 40, VW, 1, Grid);
 
         var p = _player;
-        string chipState = p is null ? "" : $"PSG[{(p.PsgEnabled ? "ON" : "OFF")}] SCC[{(p.SccEnabled ? "ON" : "OFF")}]";
-        Text(chipState, 16, Height - 26, TextColor);
+        string chipState = p is null ? "" : $"PSG[{(p.PsgEnabled ? "ON" : "OFF")}] SCC[{(p.SccEnabled ? "ON" : "OFF")}]{(p.SoloChannel is int s ? "  SOLO " + ChannelName(s) : "")}";
+        Text(chipState, 16, VH - 26, TextColor);
 
-        string help = "UP/DOWN TRACK  ENTER PLAY  SPACE PAUSE  LEFT/RIGHT SEEK  P PSG  S SCC  1-8 CHANNEL  O PROFILE  L AUTONEXT  R RESTART  H HELP  ESC QUIT";
-        Text(help, 16, Height - 12, Dim);
+        string help = "UP/DOWN TRACK  ENTER PLAY  SPACE PAUSE  LEFT/RIGHT SEEK  CLICK: BAR/SEEK + LABEL:SOLO  P PSG  S SCC  1-8 CHANNEL  O PROFILE  L AUTONEXT  R RESTART  H HELP  ESC QUIT";
+        Text(help, 16, VH - 12, Dim);
 
         if (_statusTimer > 0)
         {
             int w = PixelFont.Measure(_status, 2);
-            Text(_status, Width - 16 - w, Height - 66, Accent, 2);
+            Text(_status, VW - 16 - w, VH - 66, Accent, 2);
         }
     }
 
     private void DrawHelp()
     {
-        const int w = 560, h = 250;
-        int x = (Width - w) / 2, y = (Height - h) / 2;
+        const int w = 640, h = 286;
+        int x = (VW - w) / 2, y = (VH - h) / 2;
         Panel(x, y, w, h, PanelHi);
         Rect(x, y, w, 24, PanelColor);
         Text("HELP", x + 10, y + 8, Accent);
@@ -669,6 +849,8 @@ public sealed class VisualizerGame : Game
             "ENTER          PLAY SELECTED",
             "SPACE          PAUSE / RESUME",
             "LEFT / RIGHT   SEEK -/+ 5 S",
+            "CLICK BAR      SEEK TO POSITION",
+            "CLICK LABEL    SOLO THAT CHANNEL",
             "P / S          TOGGLE PSG / SCC",
             "1 2 3          PSG CHANNELS",
             "4 5 6 7 8      SCC CHANNELS",
@@ -679,9 +861,181 @@ public sealed class VisualizerGame : Game
             "ESC            QUIT",
             "",
             "DRAG A .VGM FILE INTO THE WINDOW TO PLAY IT",
+            "MSXAUDIOVISUALIZER SONG.VGM --RECORD OUT.GIF --SECONDS 10",
         };
 
         for (int i = 0; i < lines.Length; i++)
-            Text(lines[i], x + 16, y + 36 + i * 14, i == lines.Length - 1 ? Dim : TextColor);
+            Text(lines[i], x + 16, y + 36 + i * 14, i >= lines.Length - 2 ? Dim : TextColor);
+    }
+
+    // ── Captura / gravação ──────────────────────────────────────────────────────────
+
+    private int _frame;
+    private bool _shotDone;
+
+    private void TryScreenshot()
+    {
+        if (_shotDone)
+            return;
+
+        _frame++;
+        string? path = Environment.GetEnvironmentVariable("MSXAUDIO_SHOT");
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        int target = int.TryParse(Environment.GetEnvironmentVariable("MSXAUDIO_SHOT_FRAME"), out int f) ? f : 90;
+        if (_frame < target)
+            return;
+
+        _shotDone = true;
+        SavePng(path);
+        Exit();
+    }
+
+    private Color[] ReadBackBuffer(out int w, out int h)
+    {
+        w = GraphicsDevice.PresentationParameters.BackBufferWidth;
+        h = GraphicsDevice.PresentationParameters.BackBufferHeight;
+        var data = new Color[w * h];
+        GraphicsDevice.GetBackBufferData(data);
+        return data;
+    }
+
+    private static Color[] Downscale(Color[] src, int sw, int sh, int factor, out int dw, out int dh)
+    {
+        dw = Math.Max(1, sw / factor);
+        dh = Math.Max(1, sh / factor);
+        var dst = new Color[dw * dh];
+        int n = factor * factor;
+
+        for (int y = 0; y < dh; y++)
+        for (int x = 0; x < dw; x++)
+        {
+            int r = 0, g = 0, b = 0;
+            for (int dy = 0; dy < factor; dy++)
+            for (int dx = 0; dx < factor; dx++)
+            {
+                var c = src[(y * factor + dy) * sw + x * factor + dx];
+                r += c.R;
+                g += c.G;
+                b += c.B;
+            }
+
+            dst[y * dw + x] = new Color(r / n, g / n, b / n);
+        }
+
+        return dst;
+    }
+
+    private void SavePng(string path)
+    {
+        try
+        {
+            var data = ReadBackBuffer(out int w, out int h);
+
+            using var texture = new Texture2D(GraphicsDevice, w, h);
+            texture.SetData(data);
+            using var stream = File.Create(path);
+            texture.SaveAsPng(stream, w, h);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Visualizer] png falhou: {ex.Message}");
+        }
+    }
+
+    private void CaptureFrame()
+    {
+        if (_player is null)
+        {
+            Exit();
+            return;
+        }
+
+        if (_gif is not null)
+        {
+            var frame = ReadBackBuffer(out int w, out int h);
+            var small = Downscale(frame, w, h, _gifFactor, out int dw, out int dh);
+            _gif.AddFrame(small, dw, dh);
+        }
+        else
+        {
+            SavePng(Path.Combine(_recordDir, $"frame_{_recordFrame:D5}.png"));
+        }
+
+        _recordFrame++;
+
+        if (_recordFrame >= _recordTotal)
+        {
+            FinishRecording();
+            return;
+        }
+
+        // Advance the music by exactly one video frame (deterministic, no dropped frames).
+        int remaining = Math.Max(1, 48000 / _recordFps);
+        while (remaining > 0)
+        {
+            int chunk = Math.Min(2048, remaining);
+            _player.Render(_render, chunk);
+            remaining -= chunk;
+        }
+
+        UpdateSpectrum();
+        UpdateMeters(1f / _recordFps);
+    }
+
+    private void FinishRecording()
+    {
+        if (_gif is not null)
+        {
+            _gif.Save();
+            _gif.Dispose();
+            Console.WriteLine($"[Visualizer] gif gravado: {_recordPath} ({_recordFrame} quadros)");
+            Exit();
+            return;
+        }
+
+        Console.WriteLine($"[Visualizer] {_recordFrame} frames em {_recordDir}");
+
+        if (_recordPath is not null && TryEncode(_recordPath))
+            Console.WriteLine($"[Visualizer] gravado: {_recordPath}");
+        else
+            Console.WriteLine("[Visualizer] ffmpeg não encontrado: use os PNGs acima para montar o vídeo");
+
+        Exit();
+    }
+
+    private bool TryEncode(string output)
+    {
+        string input = Path.Combine(_recordDir, "frame_%05d.png");
+        string ext = Path.GetExtension(output).ToLowerInvariant();
+        string args = ext switch
+        {
+            ".gif" =>
+                $"-y -framerate {_recordFps} -i \"{input}\" -vf \"fps={Math.Min(30, _recordFps)},scale=960:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse\" -loop 0 \"{output}\"",
+            _ =>
+                $"-y -framerate {_recordFps} -i \"{input}\" -c:v libx264 -pix_fmt yuv420p -crf 20 \"{output}\"",
+        };
+
+        try
+        {
+            var info = new ProcessStartInfo("ffmpeg", args)
+            {
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+            };
+
+            using var process = Process.Start(info);
+            if (process is null)
+                return false;
+
+            process.WaitForExit(120_000);
+            return process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

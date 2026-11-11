@@ -134,6 +134,17 @@ public sealed class VgmPlayer : IDisposable
     public bool SccEnabled { get; set; } = true;
     public bool[] ChannelMuted { get; } = new bool[ChannelCount];
 
+    /// <summary>When set, only this channel is audible (0..7); <c>null</c> = all.</summary>
+    public int? SoloChannel { get; set; }
+
+    /// <summary>Copies the 32-sample SCC wave RAM of a channel (normalised -1..1).</summary>
+    public void CopySccWave(int sccChannel, Span<float> destination)
+    {
+        int count = Math.Min(32, destination.Length);
+        for (int i = 0; i < count; i++)
+            destination[i] = _scc.GetWaveSample(sccChannel, i) / 128f;
+    }
+
     public AudioProfile Profile => _profile;
 
     /// <summary>Ring of decimated samples per channel.</summary>
@@ -229,6 +240,8 @@ public sealed class VgmPlayer : IDisposable
         {
             bool on = ch < 3 ? PsgEnabled : SccEnabled;
             if (!on || ChannelMuted[ch])
+                continue;
+            if (SoloChannel is int solo && solo != ch)
                 continue;
 
             float[] buf = ch < 3 ? _psgBuf[ch] : _sccBuf[ch - 3];

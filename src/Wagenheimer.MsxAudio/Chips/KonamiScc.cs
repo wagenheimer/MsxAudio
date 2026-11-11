@@ -160,6 +160,19 @@ public sealed class KonamiScc
         _channels[channel].Muted = muted ? 1 : 0;
     }
 
+    /// <summary>
+    /// Reads a sample of the 32-byte wave RAM of a channel (the SCC channels 1..4 have their own
+    /// bank; channel 5 shares the bank of channel 4, as on the chip).
+    /// </summary>
+    /// <param name="channel">Channel index (0..4).</param>
+    /// <param name="index">Sample index inside the 32-byte wave (0..31).</param>
+    /// <returns>Signed 8-bit sample (-128..127).</returns>
+    public sbyte GetWaveSample(int channel, int index)
+    {
+        if (channel is < 0 or >= Channels) return 0;
+        return _wave[channel * 32 + (index & 31)];
+    }
+
     /// <summary>Renders a block into the five channel buffers.</summary>
     public void Render(float[][] channels, int count) => Render(channels, 0, count);
 
