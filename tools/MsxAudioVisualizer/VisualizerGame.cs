@@ -531,6 +531,15 @@ public sealed class VisualizerGame : Game
         if (!pressed)
             return;
 
+        // Header toggle: spectrum <-> piano roll.
+        if (_viewToggleHit.Contains(p))
+        {
+            _showRoll = !_showRoll;
+            _status = _showRoll ? "PIANO ROLL" : "SPECTRUM";
+            _statusTimer = 2f;
+            return;
+        }
+
         // Per-channel S (solo) and M (mute) buttons, then the label (solo too).
         for (int ch = 0; ch < 8; ch++)
         {
@@ -817,6 +826,7 @@ public sealed class VisualizerGame : Game
         const int x = 336, y = 104, w = VW - 348, h = 182;
         Panel(x, y, w, h);
         Text("SPECTRUM", x + 10, y + 6, Accent);
+        DrawViewToggle(x + w - 92, y + 2, "PIANO ROLL");
 
         int left = x + 10, top = y + 22, innerW = w - 20, innerH = h - 32;
 
@@ -843,7 +853,7 @@ public sealed class VisualizerGame : Game
         const int x = 336, y = 104, w = VW - 348, h = 182;
         Panel(x, y, w, h);
         Text("PIANO ROLL", x + 10, y + 6, Accent);
-        Text("TAB: SPECTRUM", x + 120, y + 6, Dim);
+        DrawViewToggle(x + w - 108, y + 2, "SPECTRUM");
 
         int left = x + 10, top = y + 22, innerW = w - 20, innerH = h - 32;
         const int lowMidi = 21, highMidi = 108;
@@ -1065,8 +1075,18 @@ public sealed class VisualizerGame : Game
         }
     }
 
-    private void DrawButton(Rectangle rect, string label, bool active, Color activeColor)
+    // Clickable "SPECTRUM / PIANO ROLL" toggle in the panel header.
+    private Rectangle _viewToggleHit;
+
+    private void DrawViewToggle(int x, int y, string label)
     {
+        int w = PixelFont.Measure(label) + 12;
+        _viewToggleHit = new Rectangle(x, y, w, 16);
+        DrawButton(_viewToggleHit, label, false, Accent);
+        Text(label, x + 6, y + 5, Dim);
+    }
+
+    private void DrawButton(Rectangle rect, string label, bool active, Color activeColor)    {
         Rect(rect, active ? activeColor : Grid);
         Rect(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2, active ? PanelHi : PanelColor);
         Text(label, rect.X + rect.Width / 2 - 2, rect.Y + 3, active ? activeColor : Dim);

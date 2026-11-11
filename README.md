@@ -119,7 +119,7 @@ shows everything the chips are doing.
 | `4 5 6 7 8` | SCC channels 1..5 |
 | `O` | mixing profile (`original` / `stereo` / `remaster`) |
 | `L` | auto-next |
-| `Tab` | switch **spectrum** ↔ **piano roll** |
+| `Tab` (or the header button) | switch **spectrum** ↔ **piano roll** |
 | `R` | restart |
 | `H` | help overlay |
 | `Esc` | quit |
