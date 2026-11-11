@@ -77,7 +77,7 @@ public class MsxAudioPlaybackTests
             if (jump > maxJump) maxJump = jump;
         }
 
-        Assert.True(maxJump < 0.35f, $"salto máximo {maxJump} (esperado < 0.35, emenda contínua)");
+        Assert.True(maxJump < 0.35f, $"max jump {maxJump} (expected < 0.35, seamless loop)");
     }
 
     [Fact]
@@ -168,7 +168,7 @@ public class MsxAudioPlaybackTests
 
         double correlation = sum / Math.Sqrt(sa * sb);
         double rmsRatio = Math.Sqrt(rmsB / rmsA);
-        Assert.True(correlation > 0.98, $"correlação streaming × offline = {correlation:F4}");
+        Assert.True(correlation > 0.98, $"streaming vs offline correlation = {correlation:F4}");
         Assert.InRange(rmsRatio, 0.95, 1.05);
     }
 

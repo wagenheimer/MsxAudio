@@ -84,6 +84,11 @@ public sealed class VisualizerGame : Game
 
     // Channel strip areas (design coordinates, set in DrawChannels).
     private readonly Rectangle[] _stripHit = new Rectangle[8];
+    private readonly Rectangle[] _soloHit = new Rectangle[8];
+    private readonly Rectangle[] _muteHit = new Rectangle[8];
+
+    // Track rows (design coordinates, filled by DrawPlaylist).
+    private readonly List<(Rectangle Rect, int Index)> _trackHit = new();
 
     // Recording.
     private bool _recording;
@@ -396,12 +401,26 @@ public sealed class VisualizerGame : Game
 
     private void HandleMouse()
     {
-        if (_player is null)
-            return;
-
         bool down = _mouse.LeftButton == ButtonState.Pressed;
         bool pressed = down && _prevMouse.LeftButton == ButtonState.Released;
         var p = MouseDesign();
+
+        // Playlist: click a track to select and play it (works even before a song is loaded).
+        if (pressed)
+        {
+            foreach (var (rect, index) in _trackHit)
+            {
+                if (!rect.Contains(p))
+                    continue;
+
+                _selected = index;
+                LoadTrack(index);
+                return;
+            }
+        }
+
+        if (_player is null)
+            return;
 
         // Seek bar: click or drag.
         if (down && _seekBar.Width > 0 && _seekBar.Contains(p))
@@ -412,18 +431,34 @@ public sealed class VisualizerGame : Game
             return;
         }
 
-        // Channel strip header: solo.
-        if (pressed)
+        if (!pressed)
+            return;
+
+        // Per-channel S (solo) and M (mute) buttons, then the label (solo too).
+        for (int ch = 0; ch < 8; ch++)
         {
-            for (int ch = 0; ch < 8; ch++)
+            if (_soloHit[ch].Contains(p))
             {
-                if (_stripHit[ch].Contains(p))
-                {
-                    _player.SoloChannel = _player.SoloChannel == ch ? null : ch;
-                    _status = _player.SoloChannel is int s ? $"SOLO {ChannelName(s)}" : "SOLO OFF";
-                    _statusTimer = 2f;
-                    return;
-                }
+                _player.SoloChannel = _player.SoloChannel == ch ? null : ch;
+                _status = _player.SoloChannel is int s ? $"SOLO {ChannelName(s)}" : "SOLO OFF";
+                _statusTimer = 2f;
+                return;
+            }
+
+            if (_muteHit[ch].Contains(p))
+            {
+                _player.ChannelMuted[ch] = !_player.ChannelMuted[ch];
+                _status = $"{ChannelName(ch)} {(_player.ChannelMuted[ch] ? "MUTED" : "ON")}";
+                _statusTimer = 2f;
+                return;
+            }
+
+            if (_stripHit[ch].Contains(p))
+            {
+                _player.SoloChannel = _player.SoloChannel == ch ? null : ch;
+                _status = _player.SoloChannel is int s ? $"SOLO {ChannelName(s)}" : "SOLO OFF";
+                _statusTimer = 2f;
+                return;
             }
         }
     }
@@ -638,6 +673,8 @@ public sealed class VisualizerGame : Game
         int rows = (h - 90) / 18;
         int first = Math.Max(0, Math.Min(_selected - rows / 2, Math.Max(0, _tracks.Count - rows)));
 
+        _trackHit.Clear();
+
         for (int i = 0; i < rows && first + i < _tracks.Count; i++)
         {
             int index = first + i;
@@ -646,6 +683,8 @@ public sealed class VisualizerGame : Game
 
             if (active)
                 Rect(x + 6, rowY - 4, w - 12, 17, PanelHi);
+
+            _trackHit.Add((new Rectangle(x + 4, rowY - 5, w - 8, 18), index));
 
             string name = Path.GetFileNameWithoutExtension(_tracks[index]).ToUpperInvariant();
             if (name.Length > 30) name = name[..30];
@@ -726,10 +765,10 @@ public sealed class VisualizerGame : Game
 
     private void DrawChannels()
     {
-        const int x = 336, y = 436, w = VW - 348, h = 230;
+        const int x = 336, y = 436, w = VW - 348, h = 222;
         Panel(x, y, w, h);
         Text("CHANNELS", x + 10, y + 6, Accent);
-        Text("CLICK THE LABEL FOR SOLO", x + 110, y + 6, Dim);
+        Text("CLICK: TRACK / SEEK BAR / LABEL = SOLO   S = SOLO   M = MUTE", x + 110, y + 6, Dim);
 
         int stripW = (w - 20) / 8;
         int stripY = y + 24;
@@ -748,16 +787,19 @@ public sealed class VisualizerGame : Game
             if (!audible) color = Dim;
 
             int sx = x + 10 + ch * stripW;
-            _stripHit[ch] = new Rectangle(sx + 2, stripY, stripW - 4, 22);
+            _stripHit[ch] = new Rectangle(sx + 2, stripY, stripW - 4, 20);
 
             Panel(sx + 2, stripY, stripW - 4, stripH, PanelHi);
 
             Text(isPsg ? $"PSG{info.Number}" : $"SCC{info.Number}", sx + 8, stripY + 6, color);
 
-            if (soloed)
-                Text("SOLO", sx + stripW - 38, stripY + 6, Accent);
-            else if (!audible)
-                Text("OFF", sx + stripW - 30, stripY + 6, Warn);
+            var soloRect = new Rectangle(sx + stripW - 38, stripY + 4, 14, 12);
+            var muteRect = new Rectangle(sx + stripW - 20, stripY + 4, 14, 12);
+            _soloHit[ch] = soloRect;
+            _muteHit[ch] = muteRect;
+
+            DrawButton(soloRect, "S", soloed, Accent);
+            DrawButton(muteRect, "M", muted, Warn);
 
             // Live mini scope.
             int scopeX = sx + 8, scopeY = stripY + 24, scopeW = stripW - 16, scopeH = 46;
@@ -819,6 +861,13 @@ public sealed class VisualizerGame : Game
         }
     }
 
+    private void DrawButton(Rectangle rect, string label, bool active, Color activeColor)
+    {
+        Rect(rect, active ? activeColor : Grid);
+        Rect(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2, active ? PanelHi : PanelColor);
+        Text(label, rect.X + rect.Width / 2 - 2, rect.Y + 3, active ? activeColor : Dim);
+    }
+
     private static readonly string[] Notes = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 
     private static string NoteName(double frequency)
@@ -833,20 +882,22 @@ public sealed class VisualizerGame : Game
 
     private void DrawFooter()
     {
-        Rect(0, VH - 40, VW, 40, PanelHi);
-        Rect(0, VH - 40, VW, 1, Grid);
+        // Kept away from the very bottom edge: a maximised window can have the taskbar over the
+        // last pixels, and the help line must stay readable.
+        Rect(0, VH - 56, VW, 44, PanelHi);
+        Rect(0, VH - 56, VW, 1, Grid);
 
         var p = _player;
         string chipState = p is null ? "" : $"PSG[{(p.PsgEnabled ? "ON" : "OFF")}] SCC[{(p.SccEnabled ? "ON" : "OFF")}]{(p.SoloChannel is int s ? "  SOLO " + ChannelName(s) : "")}";
-        Text(chipState, 16, VH - 26, TextColor);
+        Text(chipState, 16, VH - 50, TextColor);
 
-        string help = "UP/DOWN TRACK  ENTER PLAY  SPACE PAUSE  LEFT/RIGHT SEEK  CLICK: BAR/SEEK + LABEL:SOLO  P PSG  S SCC  1-8 CHANNEL  O PROFILE  L AUTONEXT  R RESTART  H HELP  ESC QUIT";
-        Text(help, 16, VH - 12, Dim);
+        Text("UP/DOWN TRACK   ENTER PLAY   SPACE PAUSE   LEFT/RIGHT SEEK   CLICK: TRACK / SEEK BAR / S-M", 16, VH - 36, Dim);
+        Text("P PSG   S SCC   1-8 CHANNEL   O PROFILE   L AUTONEXT   R RESTART   H HELP   ESC QUIT", 16, VH - 22, Dim);
 
         if (_statusTimer > 0)
         {
             int w = PixelFont.Measure(_status, 2);
-            Text(_status, VW - 16 - w, VH - 66, Accent, 2);
+            Text(_status, VW - 16 - w, VH - 82, Accent, 2);
         }
     }
 
@@ -883,7 +934,7 @@ public sealed class VisualizerGame : Game
             Text(lines[i], x + 16, y + 36 + i * 14, i >= lines.Length - 2 ? Dim : TextColor);
     }
 
-    // ── Captura / gravação ──────────────────────────────────────────────────────────
+    // -- Capture / recording -------------------------------------------------------
 
     private int _frame;
     private bool _shotDone;
@@ -1005,7 +1056,7 @@ public sealed class VisualizerGame : Game
         {
             _gif.Save();
             _gif.Dispose();
-            Console.WriteLine($"[Visualizer] gif gravado: {_recordPath} ({_recordFrame} quadros)");
+            Console.WriteLine($"[Visualizer] GIF written: {_recordPath} ({_recordFrame} frames)");
             Exit();
             return;
         }
@@ -1013,9 +1064,9 @@ public sealed class VisualizerGame : Game
         Console.WriteLine($"[Visualizer] {_recordFrame} frames em {_recordDir}");
 
         if (_recordPath is not null && TryEncode(_recordPath))
-            Console.WriteLine($"[Visualizer] gravado: {_recordPath}");
+            Console.WriteLine($"[Visualizer] recording written: {_recordPath}");
         else
-            Console.WriteLine("[Visualizer] ffmpeg não encontrado: use os PNGs acima para montar o vídeo");
+            Console.WriteLine("[Visualizer] ffmpeg not found: use the PNG sequence above to build the video");
 
         Exit();
     }

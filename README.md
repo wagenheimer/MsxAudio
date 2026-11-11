@@ -1,54 +1,78 @@
 # Wagenheimer.MsxAudio
 
-Emulador de áudio de **MSX** (PSG **AY-3-8910** + **Konami SCC/K051649**), leitor/gravador de
-**VGM**, extração de música de **ROM** e um **motor de reprodução** para jogos — com um formato de
-biblioteca próprio (`.msxaudio`) para salvar e distribuir as extrações.
+**MSX audio for .NET** — AY-3-8910 (PSG) and Konami SCC emulation, VGM playback/recording, ROM music
+extraction and a game-ready streaming engine with its own `.msxaudio` library format.
 
-Sem dependência de engine no núcleo: o pacote `Wagenheimer.MsxAudio` é C# puro. A ponte com o
-MonoGame fica em `Wagenheimer.MsxAudio.MonoGame`.
+[![NuGet](https://img.shields.io/nuget/v/Wagenheimer.MsxAudio?logo=nuget&label=Wagenheimer.MsxAudio)](https://www.nuget.org/packages/Wagenheimer.MsxAudio)
+[![NuGet](https://img.shields.io/nuget/v/Wagenheimer.MsxAudio.MonoGame?logo=nuget&label=Wagenheimer.MsxAudio.MonoGame)](https://www.nuget.org/packages/Wagenheimer.MsxAudio.MonoGame)
+[![Downloads](https://img.shields.io/nuget/dt/Wagenheimer.MsxAudio)](https://www.nuget.org/packages/Wagenheimer.MsxAudio)
+[![License](https://img.shields.io/github/license/wagenheimer/MsxAudio)](LICENSE)
+[![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](#requirements)
+[![C#](https://img.shields.io/badge/C%23-pure%20core-239120?logo=csharp)](#architecture)
 
 ```bash
-dotnet add package Wagenheimer.MsxAudio
-dotnet add package Wagenheimer.MsxAudio.MonoGame   # opcional (MonoGame)
+dotnet add package Wagenheimer.MsxAudio            # engine-agnostic core (pure C#)
+dotnet add package Wagenheimer.MsxAudio.MonoGame  # optional MonoGame bridge
 ```
+
+<p align="center"><img src="docs/media/visualizer.gif" alt="MSX Audio Visualizer playing a VGM" width="900"></p>
 
 ---
 
-## Por que existe
+## Table of contents
 
-O áudio de um jogo de MSX é o que os chips tocam — não uma gravação. Este pacote guarda e reproduz
-as **escritas de registrador** (o VGM), que é a fonte lossless: alguns KB por música, loop exato e
-timbre idêntico em qualquer máquina, sem codec no meio.
+- [Why this package exists](#why-this-package-exists)
+- [The chips](#the-chips)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Visual player (MonoGame)](#visual-player-monogame)
+- [The `.msxaudio` format](#the-msxaudio-format)
+- [Playback engine](#playback-engine)
+- [Extracting music from a ROM](#extracting-music-from-a-rom)
+- [CLI](#cli)
+- [Mixing profiles](#mixing-profiles)
+- [Validation](#validation)
+- [Architecture](#architecture)
+- [Status and roadmap](#status-and-roadmap)
+- [Tests](#tests)
+- [Legal](#legal)
 
-| Problema do caminho "gravar WAV/OGG" | Como o pacote resolve |
+---
+
+## Why this package exists
+
+MSX game audio *is what the chips played* — not a recording. This package stores and plays the
+**register writes** (the VGM), which is the lossless source of truth: a few KB per song, a sample
+accurate loop, and the exact timbre on any machine, with no codec in between.
+
+| Problem with the "record a WAV/OGG" route | How this package solves it |
 | :--- | :--- |
-| estalo na emenda do loop (corte por tempo) | loop detectado na sequência de escritas, e no streaming o chip **não reinicia** (loop contínuo) |
-| artefato de codec, volume inconsistente | render de chip em 4–8× de sobreamostragem + FIR, nível fiel ao hardware |
-| centenas de MB de áudio pronto | VGMs de poucos KB, renderizados em tempo real |
-| perder a extração | pacote `.msxaudio` (ZIP) com manifesto + VGMs, versionável |
+| click at the loop seam (time based cut) | the loop is detected in the write stream, and the streaming engine **never restarts the chip** (continuous loop) |
+| codec artefacts, inconsistent level | chip render at 4–8× oversampling + FIR decimation, level calibrated to hardware |
+| hundreds of MB of rendered audio | a few KB of VGM, rendered in real time |
+| losing the extraction | a `.msxaudio` (ZIP) package with a manifest + VGMs, versionable |
 
-## Os chips
+## The chips
 
-| Chip | Implementação | O que é emulado |
+| Chip | Implementation | What is emulated |
 | :--- | :--- | :--- |
-| **PSG AY-3-8910** | porte do **emu2149** (mesmo núcleo do VGMPlay) | 3 canais de onda quadrada, ruído LFSR de 17 bits, 16 formas de envelope, tabela de volume do AY |
-| **Konami SCC (K051649)** | porte do núcleo do **MAME/libvgm** | 5 canais de wavetable de 32 bytes, acumulador de fase 16.16, key-on em `0x8F`, wave do canal 5 compartilhada com o 4 |
+| **PSG AY-3-8910** | port of **emu2149** (the same core used by VGMPlay) | 3 square channels, 17-bit LFSR noise, 16 envelope shapes, the AY volume table |
+| **Konami SCC (K051649)** | port of the **MAME/libvgm** core | 5 wavetable channels (32 bytes each), 16.16 phase accumulator, key-on at `0x8F`, channel 5 sharing the wave of channel 4 |
 
-Clocks do MSX: PSG **1.789.772,5 Hz** (divisor 16) e SCC **1.789.772,5 Hz** no VGM
-(`f = clock / (16 × (período + 1))`, o que equivale a `3579545 / (32 × (período + 1))`).
+MSX clocks: PSG **1,789,772.5 Hz** (divide by 16) and SCC **1,789,772.5 Hz** in VGMs
+(`f = clock / (16 × (period + 1))`, equivalent to `3579545 / (32 × (period + 1))`).
 
-## Formato `.msxaudio`
+## Requirements
 
-ZIP com manifesto + VGMs:
+| Piece | Version |
+| :--- | :--- |
+| .NET | **10** (`net10.0`) |
+| MonoGame (only for the bridge and the visualizer) | 3.8 (`MonoGame.Framework.DesktopGL`) |
+| openMSX (only for ROM extraction) | 19+ (portable build works) |
 
-```
-manifest.json
-songs/stage_a.vgm
-clips/jump.vgm
-```
+The core has **no engine dependency** and targets `net10.0` with nullable enabled.
 
-`manifest.json` traz título, origem, clocks e, por música, `loop`, `loopStart`, `loopSeconds`,
-`seconds` e `originalId` (o id da rotina de som da ROM).
+## Quick start
 
 ```csharp
 using Wagenheimer.MsxAudio.Songs;
@@ -56,99 +80,114 @@ using Wagenheimer.MsxAudio.Playback;
 using Wagenheimer.MsxAudio.Mixing;
 
 using var library = MsxAudioLibrary.Load("Content/Audio/kingsvalley.msxaudio");
-using var engine = new MsxAudioEngine(library, AudioProfile.Original);
-engine.PlaySong("stage_a");
-engine.PlaySample("jump");
+using var engine  = new MsxAudioEngine(library, AudioProfile.Original);
+
+engine.PlaySong("stage_a");     // loop handled by the manifest
+engine.PlaySample("jump");      // short VGM or WAV clip
 ```
 
-## Motor de reprodução
-
-- **Música em streaming**: o VGM é consumido enquanto toca; o loop é contínuo (o estado dos chips
-  nunca é reiniciado). Cada faixa ocupa só o VGM — sem PCM pré-renderizado.
-- **Player de sample**: efeitos como PCM, com volume, pan e polifonia (`MaxSampleVoices`, rouba o
-  mais antigo). Um efeito guardado como VGM curto é renderizado uma vez e cacheado.
-- **Barramentos** de volume: `MusicVolume`, `SampleVolume`, `MasterVolume`.
-- `Render(float[] destino, int frames)` entrega **estéreo intercalado** pronto para a placa.
-
-### MonoGame
+MonoGame bridge:
 
 ```csharp
 using Wagenheimer.MsxAudio.MonoGame;
 
-var player = new MsxAudioPlayer(engine);   // usa DynamicSoundEffectInstance (streaming)
+var player = new MsxAudioPlayer(engine);   // DynamicSoundEffectInstance (streaming)
 player.Start();
 player.PlaySong("menu");
 player.PlaySample("password_key");
 
-// no Update():
-player.Update();                           // mantém a fila de buffers cheia
+// in Update():
+player.Update();                           // keeps the buffer queue full
 ```
 
-## Player visual (MonoGame)
+`Render(float[] destination, int frames)` also gives you **interleaved stereo** if you want to feed
+another backend (SDL, NAudio, a custom mixer, the visualizer…).
 
-<p align="center"><img src="docs/media/visualizer.gif" alt="MSX Audio Visualizer playing a VGM" width="900"></p>
+## Visual player (MonoGame)
 
-`tools/MsxAudioVisualizer` é um player gráfico que abre um **VGM** (arquivo, pasta ou *drag & drop*),
-toca em tempo real e mostra tudo o que os chips estão fazendo:
+`tools/MsxAudioVisualizer` opens a **VGM** (file, folder or *drag & drop*), plays it in real time and
+shows everything the chips are doing.
 
-| Tecla | Ação |
+| Key | Action |
 | :--- | :--- |
-| `↑` / `↓` | escolhe a faixa da pasta |
-| `Enter` | toca a faixa selecionada |
-| `Espaço` | pausa / retoma |
-| `←` / `→` | volta/avança 5 s (reconstrói o estado dos chips) |
-| `P` / `S` | liga/desliga **PSG** / **SCC** |
-| `1 2 3` | PSG canais 1..3 |
-| `4 5 6 7 8` | SCC canais 1..5 |
-| `O` | perfil de mixagem (`original` / `stereo` / `remaster`) |
+| `↑` / `↓` | select a track from the folder |
+| `Enter` (or click) | play the selected track |
+| `Space` | pause / resume |
+| `←` / `→` | seek -/+ 5 s (rebuilds the chip state) |
+| `P` / `S` | toggle **PSG** / **SCC** |
+| `1 2 3` | PSG channels 1..3 |
+| `4 5 6 7 8` | SCC channels 1..5 |
+| `O` | mixing profile (`original` / `stereo` / `remaster`) |
 | `L` | auto-next |
-| `R` | reinicia |
-| `H` | ajuda |
-| `Esc` | sai |
+| `R` | restart |
+| `H` | help overlay |
+| `Esc` | quit |
 
-Clique na **barra de posição** para pular para um instante (com texto `atual / total` e a janela de
-loop) e no **rótulo do canal** para dar **solo** nele. Cada canal mostra volume, nível com
-**peak hold**, frequência, nota e — nos canais SCC — a **wavetable de 32 amostras**.
+What you see:
 
-A tela mostra: lista de faixas, **espectro** (FFT log), **osciloscópio** do mix, e uma faixa por
-canal (PSG azul, SCC verde) com **mini-osciloscópio**, volume, nível, **frequência** e **nota**.
-Também dá para gerar um PNG por linha de comando (documentação/CI):
+- **POSITION** bar with `current / total`, the loop window and a marker — click or drag to seek;
+- **SPECTRUM** (log-spaced FFT) and the **MASTER** oscilloscope;
+- one strip per channel (PSG blue, SCC green) with live oscilloscope, volume, level with **peak
+  hold**, frequency, nearest **note**, key state and — for SCC — the **32-sample wave RAM**;
+- **Solo** by clicking a channel label (or its `S` button) and **Mute** through the `M` button.
+
+The UI renders to a fixed **1280×720** render target and is letterboxed into the window, so
+resizing/maximising never moves anything.
 
 ```bash
+# live
 dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
+
+# screenshot for docs/CI
 MSXAUDIO_SHOT=shot.png MSXAUDIO_SHOT_FRAME=200 dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
-```
 
-A janela é redimensionável/maximizável: a UI é desenhada num **RenderTarget 1280×720** e
-letterboxed na janela, então nada sai do lugar em nenhum tamanho. Também aceita tamanho inicial.
-Para gravar a sessão:
-
-```bash
-# GIF (encoder embutido, sem ffmpeg) — 640x360
+# record a GIF with the built-in encoder (no ffmpeg needed), 640×360
 MsxAudioVisualizer music/stage_a.vgm --record out.gif --seconds 10 --fps 15
 
-# MP4 (usa o ffmpeg do PATH; sem ele, deixa a sequência de PNGs)
+# record an MP4 through ffmpeg (falls back to the PNG sequence when ffmpeg is missing)
 MsxAudioVisualizer music/stage_a.vgm --record out.mp4 --seconds 20 --fps 30
 
-# tamanho da janela
+# window size
 MsxAudioVisualizer music/stage_a.vgm --width 1600 --height 900
 ```
 
-A gravação é **determinística**: cada quadro avança exatamente `1/fps` s de música (sem depender
-do framerate da máquina).
+Recording is **deterministic**: every frame advances exactly `1/fps` seconds of music, independent of
+the machine frame rate.
 
-## Extrair de uma ROM
-O extrator dirige o **openMSX** (o emulador faz o trabalho sujo: VDP, CPU, mapper, SCC) e injeta
-`CALL <rotina de som>` com cada id, gravando o VGM. O que muda de jogo para jogo é descrito num
-**perfil JSON** (como chegar numa tela silenciosa, o endereço da rotina e os ids) — nada de
-recompilar.
+## The `.msxaudio` format
+
+A ZIP with a manifest and the VGMs:
+
+```
+manifest.json
+songs/stage_a.vgm
+clips/jump.vgm
+```
+
+`manifest.json` carries the title, origin, clocks and, per song, `loop`, `loopStart`, `loopSeconds`,
+`seconds` and `originalId` (the id of the ROM's sound routine).
+
+## Playback engine
+
+- **Streaming music**: the VGM is consumed while it plays; the loop is continuous (the chip state is
+  never restarted). Each track costs only its VGM — no pre-rendered PCM.
+- **Sample player**: effects as PCM with volume, pan and polyphony (`MaxSampleVoices`, steals the
+  oldest). An effect stored as a short VGM is rendered once and cached.
+- **Volume buses**: `MusicVolume`, `SampleVolume`, `MasterVolume`.
+- **Mute/solo aware**: profiles and per-channel gain changes apply without a pop.
+
+## Extracting music from a ROM
+
+The extractor drives **openMSX** (the emulator does the hard part: VDP, CPU, mapper, SCC) and injects
+`CALL <sound routine>` with each id, recording the VGM. What changes from game to game lives in a
+**JSON profile** (how to reach a silent screen, the routine address and the ids) — no recompiling.
 
 ```bash
 MsxAudioTool extract "King's Valley II (JP)[RC-760].rom" kingsvalley.msxaudio \
     --profile profiles/kingsvalley2.json --openmsx tools/omsx/openmsx.exe
 ```
 
-`profiles/kingsvalley2.json` (exemplo real, Konami 1988):
+`profiles/kingsvalley2.json` (a real example, Konami 1988):
 
 ```json
 {
@@ -178,8 +217,8 @@ MsxAudioTool extract "King's Valley II (JP)[RC-760].rom" kingsvalley.msxaudio \
 
 `extract-direct` runs the **cartridge's own sound driver in process**: a minimal MSX1 machine
 (Z80 core + Konami SCC mapper + 16 KB RAM + PSG/SCC capture + BIOS entry stubs for `RST 30h`,
-`WRTPSG` and `RDPSG`) boots the ROM, installs the interrupt hook and records the register writes
-— no openMSX, no window.
+`WRTPSG` and `RDPSG`) boots the ROM, installs the interrupt hook and records the register writes —
+no openMSX, no window.
 
 ```bash
 MsxAudioTool extract-direct "rom.msx" game.msxaudio --profile profiles/kingsvalley2.json
@@ -193,52 +232,55 @@ reference.
 ## CLI
 
 ```bash
-MsxAudioTool import <pasta-vgm> <saida.msxaudio> [--title T] [--clips]
-MsxAudioTool info <pacote.msxaudio>
-MsxAudioTool extract <rom> <saida.msxaudio> --profile perfil.json [--openmsx caminho]
-MsxAudioTool render <pacote.msxaudio> <id|all> <saida.wav> [--profile original|stereo|remaster]
-MsxAudioTool verify <vgm> <captura.wav>
-MsxAudioTool unpack <pacote.msxaudio> <pasta>
+MsxAudioTool import <vgm-folder> <out.msxaudio> [--title T] [--clips]
+MsxAudioTool info <package.msxaudio>
+MsxAudioTool extract <rom> <out.msxaudio> --profile profile.json [--openmsx path]
+MsxAudioTool extract-direct <rom> <out.msxaudio> --profile profile.json
+MsxAudioTool render <package.msxaudio> <id|all> <out.wav> [--profile original|stereo|remaster]
+MsxAudioTool verify <vgm> <capture.wav>
+MsxAudioTool unpack <package.msxaudio> <folder>
 ```
 
-## Perfis de mixagem
+## Mixing profiles
 
-| Perfil | O que muda |
+| Profile | What changes |
 | :--- | :--- |
-| `original` | fiel: os 8 canais no centro, só o corte de DC |
-| `stereo` | PSG em −30/0/+30% e SCC em −55/−25/0/+25/+55% + passa-baixa de 16 kHz |
-| `remaster` | sobreamostragem 8×, pan mais aberto, passa-baixa 17 kHz, reverb curto, normalização de pico |
+| `original` | faithful: all 8 channels centred, only the DC cut |
+| `stereo` | PSG at −30/0/+30 % and SCC at −55/−25/0/+25/+55 % + 16 kHz low-pass |
+| `remaster` | 8× oversampling, wider pan, 17 kHz low-pass, short reverb, peak normalisation |
 
-## Validação
+## Validation
 
-Contra a captura do openMSX do mesmo VGM:
+Against openMSX recordings of the same VGM:
 
-| Medida | Resultado |
+| Measurement | Result |
 | :--- | :--- |
-| LTAS (forma do espectro médio) | correlação **0,998** |
-| Envelope de amplitude | correlação **0,95** (offset constante ≈ latência do `record`) |
-| Nível | diferença de **0,3 dB** (calibrado em `AudioProfile.DefaultMasterGain`) |
-| Emenda do loop (render de uma volta) | salto **0,025** contra delta típico **0,047** |
+| LTAS (mean spectral shape) | correlation **0.998** |
+| Amplitude envelope | correlation **0.95** (constant offset ≈ `record` latency) |
+| Level | **0.3 dB** difference (calibrated in `AudioProfile.DefaultMasterGain`) |
+| Loop seam (one round render) | jump **0.025** against a typical delta of **0.047** |
 
-A correlação amostra a amostra não serve como métrica: o `record` do openMSX reamostra e atrasa, e
-qualquer fração de milissegundo desalinha uma onda quadrada.
+Sample-by-sample correlation is not a valid metric here: openMSX's `record` resamples and delays, and
+a fraction of a millisecond misaligns a square wave.
 
-## Estrutura do repositório
+## Architecture
 
 ```
-src/Wagenheimer.MsxAudio/             núcleo (C# puro)
+src/Wagenheimer.MsxAudio/             core (pure C#, no engine dependency)
   Chips/       Ay8910, KonamiScc
   Vgm/         VgmFile, VgmWriter, VgmLoopFinder
-  Mixing/      AudioProfile, MsxSoundRenderer, FirDecimator
+  Mixing/      AudioProfile, MsxSoundRenderer, FirDecimator, Biquad, StereoReverb
   Songs/       MsxAudioLibrary (.msxaudio)
   Playback/    MsxAudioEngine, WavDecoder
-  Extraction/  VgmImporter, OpenMsxRomExtractor (+ perfis)
+  Extraction/  VgmImporter, OpenMsxRomExtractor, DirectRomExtractor (+ profiles)
 src/Wagenheimer.MsxAudio.MonoGame/    MsxAudioPlayer (DynamicSoundEffectInstance)
-tools/MsxAudioTool/                   CLI
-tests/Wagenheimer.MsxAudio.Tests/     testes (chips, VGM, pacote, motor)
+tools/MsxAudioTool/                   extractor/import/export CLI
+tools/MsxAudioVisualizer/             MonoGame visual player (PSG/SCC per channel, GIF export)
+tests/Wagenheimer.MsxAudio.Tests/     chips, VGM, package, engine, MSX machine
+profiles/                             per-game extraction profiles (JSON)
 ```
 
-## Status
+## Status and roadmap
 
 | Area | State |
 | :--- | :--- |
@@ -247,8 +289,9 @@ tests/Wagenheimer.MsxAudio.Tests/     testes (chips, VGM, pacote, motor)
 | `.msxaudio` package | ✅ |
 | Streaming engine + sample player | ✅ (parity test with the offline renderer) |
 | MonoGame bridge | ✅ |
+| Visual player (per-channel view, GIF/MP4 export) | ✅ |
 | ROM extraction via openMSX | ✅ (bit-exact reference path) |
-| ROM extraction in process | 🧪 experimental (tempo ~6% off; VDP vblank not modelled) |
+| ROM extraction in process | 🧪 experimental (tempo ~6 % off; VDP vblank not modelled) |
 | Remaster profile (stereo/reverb) | ✅ |
 
 ### Roadmap
@@ -257,6 +300,7 @@ tests/Wagenheimer.MsxAudio.Tests/     testes (chips, VGM, pacote, motor)
    hardware cadence (then loop detection works and no external emulator is needed).
 2. A `play` CLI command that streams through `MsxAudioEngine` (live preview).
 3. Optional `SoundEffect`-based player for projects that cannot use `DynamicSoundEffectInstance`.
+4. Video export with audio (WAV render + ffmpeg mux) in the visualizer.
 
 ## Tests
 
@@ -264,12 +308,12 @@ tests/Wagenheimer.MsxAudio.Tests/     testes (chips, VGM, pacote, motor)
 dotnet test MsxAudio.slnx
 ```
 
-Covers chip frequencies (PSG/SCC formulas), VGM parse/write round-trip, loop detection, package
-IO, the streaming engine (loop continuity, sample voices, volume), streaming vs offline parity, the
+Covers chip frequencies (PSG/SCC formulas), VGM parse/write round-trip, loop detection, package IO,
+the streaming engine (loop continuity, sample voices, volume), streaming vs offline parity, the
 built-in MSX machine (mapper, PSG/SCC capture, id pass-through) and WAV decoding.
 
-## Aviso
+## Legal
 
-O jogo, a arte e as músicas de MSX pertencem aos seus autores (a Konami, no caso do King's Valley).
-Este pacote **não** distribui ROMs nem dados extraídos: ele emula os chips e lê VGMs/pacotes que
-você gerar a partir da sua própria ROM. Use somente com material que você tem direito de usar.
+MSX games, their art and their music belong to their authors (Konami, for King's Valley). This
+package does **not** ship ROMs or extracted data: it emulates the chips and reads VGM files and
+packages that **you** generate from your own ROM. Use it only with material you are allowed to use.

@@ -5,13 +5,13 @@ using Wagenheimer.MsxAudio.Playback;
 namespace Wagenheimer.MsxAudio.MonoGame;
 
 /// <summary>
-/// Ponte do <see cref="MsxAudioEngine"/> com o MonoGame: toca música e efeitos do MSX por um
-/// único <see cref="DynamicSoundEffectInstance"/> (streaming, sem arquivo intermediário).
+/// Bridge between <see cref="MsxAudioEngine"/> and MonoGame: plays MSX music and effects through a
+/// single <see cref="DynamicSoundEffectInstance"/> (streaming, no intermediate file).
 /// </summary>
 /// <remarks>
-/// <para>Chame <see cref="Update"/> uma vez por frame — ele mantém a fila de buffers cheia.
-/// Em vez de usar o evento <c>BufferNeeded</c> (que pode disparar em outra thread), o envio é
-/// feito no thread do jogo, o que evita disputa com <see cref="PlaySong"/>.</para>
+/// <para>Call <see cref="Update"/> once per frame — it keeps the buffer queue full. Instead of the
+/// <c>BufferNeeded</c> event (which may fire on another thread), buffers are submitted on the game
+/// thread, which avoids contention with <see cref="PlaySong"/>.</para>
 ///
 /// <code>
 /// var library = MsxAudioLibrary.Load("Content/Audio/kingsvalley.msxaudio");
@@ -19,7 +19,7 @@ namespace Wagenheimer.MsxAudio.MonoGame;
 /// var player  = new MsxAudioPlayer(engine);
 /// player.Start();
 /// player.PlaySong("stage_a");
-/// // no Update: player.Update();
+/// // in Update: player.Update();
 /// </code>
 /// </remarks>
 public sealed class MsxAudioPlayer : IDisposable
@@ -31,9 +31,9 @@ public sealed class MsxAudioPlayer : IDisposable
     private readonly byte[] _byteBuffer;
     private DynamicSoundEffectInstance? _instance;
 
-    /// <summary>Cria o player.</summary>
-    /// <param name="engine">Motor já com a biblioteca carregada.</param>
-    /// <param name="chunkFrames">Quadros por buffer (1024 ≈ 21 ms em 48 kHz).</param>
+    /// <summary>Creates the player.</summary>
+    /// <param name="engine">Engine with the library already loaded.</param>
+    /// <param name="chunkFrames">Frames per buffer (1024 ≈ 21 ms at 48 kHz).</param>
     public MsxAudioPlayer(MsxAudioEngine engine, int chunkFrames = 1024)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
@@ -42,16 +42,16 @@ public sealed class MsxAudioPlayer : IDisposable
         _byteBuffer = new byte[_chunkFrames * 2 * 2];
     }
 
-    /// <summary>O stream está tocando?</summary>
+    /// <summary>Is the stream playing?</summary>
     public bool IsRunning => _instance is { State: SoundState.Playing };
 
-    /// <summary>Buffer de segurança (quantos buffers ficam na fila).</summary>
+    /// <summary>Safety margin: how many buffers stay queued.</summary>
     public int QueuedBuffers { get; set; } = 3;
 
-    /// <summary>Música tocando (id) ou <c>null</c>.</summary>
+    /// <summary>Id of the playing song, or <c>null</c>.</summary>
     public string? CurrentSongId => _engine.CurrentSongId;
 
-    /// <summary>Inicia o stream.</summary>
+    /// <summary>Starts the stream.</summary>
     public void Start()
     {
         if (_instance != null) return;
@@ -61,55 +61,55 @@ public sealed class MsxAudioPlayer : IDisposable
         Fill();
     }
 
-    /// <summary>Para o stream e libera a instância.</summary>
+    /// <summary>Stops the stream and releases the instance.</summary>
     public void Stop()
     {
         if (_instance == null) return;
-        try { _instance.Stop(); } catch { /* ignore */ }
+        try { _instance.Stop(); } catch { /* already stopped */ }
         _instance.Dispose();
         _instance = null;
     }
 
-    /// <summary>Toca uma música da biblioteca.</summary>
+    /// <summary>Plays a song from the library.</summary>
     public void PlaySong(string id, bool loop = true)
     {
         lock (_gate) _engine.PlaySong(id, loop);
     }
 
-    /// <summary>Corta a música.</summary>
+    /// <summary>Cuts the music.</summary>
     public void StopSong()
     {
         lock (_gate) _engine.StopSong();
     }
 
-    /// <summary>Toca um efeito (sample) pelo id.</summary>
+    /// <summary>Plays an effect (sample) by id.</summary>
     public void PlaySample(string id, float volume = 1f, float pan = 0f)
     {
         lock (_gate) _engine.PlaySample(id, volume, pan);
     }
 
-    /// <summary>Mantém a fila de buffers abastecida. Chame uma vez por frame.</summary>
+    /// <summary>Keeps the buffer queue full. Call once per frame.</summary>
     public void Update()
     {
         if (_instance == null) return;
         Fill();
     }
 
-    /// <summary>Volume da música (0..1).</summary>
+    /// <summary>Music volume (0..1).</summary>
     public float MusicVolume
     {
         get => _engine.MusicVolume;
         set => _engine.MusicVolume = value;
     }
 
-    /// <summary>Volume dos efeitos (0..1).</summary>
+    /// <summary>Effect volume (0..1).</summary>
     public float SampleVolume
     {
         get => _engine.SampleVolume;
         set => _engine.SampleVolume = value;
     }
 
-    /// <summary>Volume geral (0..1).</summary>
+    /// <summary>Master volume (0..1).</summary>
     public float MasterVolume
     {
         get => _engine.MasterVolume;
@@ -142,7 +142,7 @@ public sealed class MsxAudioPlayer : IDisposable
             }
             catch (InvalidOperationException)
             {
-                break; // stream parado/descartado
+                break; // stream stopped/disposed
             }
 
             pending = _instance.PendingBufferCount;

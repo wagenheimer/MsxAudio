@@ -161,13 +161,10 @@ public sealed class KonamiScc
     }
 
     /// <summary>
-    /// Reads a sample of the 32-byte wave RAM of a channel (the SCC channels 1..4 have their own
-    /// bank; channel 5 shares the bank of channel 4, as on the chip).
+    /// Returns the raw wave-table byte (signed -128..127) of a channel, for visualisers.
+    /// Channel 5 shares the bank of channel 4, as on the chip.
     /// </summary>
-    /// <param name="channel">Channel index (0..4).</param>
-    /// <param name="index">Sample index inside the 32-byte wave (0..31).</param>
-    /// <returns>Signed 8-bit sample (-128..127).</returns>
-    public sbyte GetWaveSample(int channel, int index)
+    public int GetWaveSample(int channel, int index)
     {
         if (channel is < 0 or >= Channels) return 0;
         return _wave[channel * 32 + (index & 31)];
