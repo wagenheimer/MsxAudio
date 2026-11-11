@@ -36,6 +36,7 @@ dotnet add package Wagenheimer.MsxAudio.MonoGame  # optional MonoGame bridge
 - [Quick start](#quick-start)
 - [Downloads](#downloads)
 - [MSXScope (visual player)](#msxscope-visual-player)
+- [Screens](#screens)
 - [The `.msxaudio` format](#the-msxaudio-format)
 - [Playback engine](#playback-engine)
 - [Extracting music from a ROM](#extracting-music-from-a-rom)
@@ -170,6 +171,16 @@ In the **piano** view:
 | `PLAY ALL` | walks the **audible** channels, playing each instrument at the note the song is using |
 | `<` / `>` | shifts the keyboard one octave (3 octaves on screen) |
 
+## Screens
+
+| Spectrum (dB + peak hold) | Piano roll (song map + chords) |
+| :---: | :---: |
+| <img src="docs/media/spectrum.png" width="100%"> | <img src="docs/media/piano-roll.png" width="100%"> |
+| **Piano** (hold a key, stacked notes) | **Folder browser** (breadcrumb, recents) |
+| <img src="docs/media/piano.png" width="100%"> | <img src="docs/media/folder-browser.png" width="100%"> |
+| **Mixing profiles** | **Help** (with the build version) |
+| <img src="docs/media/profiles.png" width="100%"> | <img src="docs/media/help.png" width="100%"> |
+
 What you see:
 
 - **POSITION** bar with `current / total`, the loop window and a marker — click or drag to seek;
@@ -292,21 +303,34 @@ MsxAudioTool extract "King's Valley II (JP)[RC-760].rom" kingsvalley.msxaudio \
 > Songs with long loops need longer captures (KV2's `stage_e` only reveals its 67.287 s loop with
 > 300 s of recording). Use `secondsById` for that.
 
-### Direct extraction, no external emulator (experimental)
+### Direct extraction, no external emulator
 
-`extract-direct` runs the **cartridge's own sound driver in process**: a minimal MSX1 machine
-(Z80 core + Konami SCC mapper + 16 KB RAM + PSG/SCC capture + BIOS entry stubs for `RST 30h`,
-`WRTPSG` and `RDPSG`) boots the ROM, installs the interrupt hook and records the register writes —
+`extract-direct` runs the **cartridge's own sound driver in process**: a minimal MSX machine (Z80
+core + mapper + 16 KB RAM + PSG/SCC capture + keyboard/joystick + VDP vblank/status + BIOS entry
+stubs for `RST 30h`, `WRTPSG`, `RDPSG` and `SNSMAT`) boots the ROM and records the register writes —
 no openMSX, no window.
 
+Cartridges are supported through **mappers**: auto by size (up to 32 KB linear, larger Konami SCC) or
+explicit `--mapper linear | konami | konami-scc | ascii8 | ascii16` (16 KB to 1 MB).
+
 ```bash
+# full song list, using a curated profile (sound routine + ids + names)
 MsxAudioTool extract-direct "rom.msx" game.msxaudio --profile profiles/kingsvalley2.json
+
+# whatever the game plays after boot, optionally sending keys/joystick
+MsxAudioTool capture "rom.msx" title.vgm --seconds 20 --press 8:1@2    # Space at 2 s
+MsxAudioTool capture "rom.msx" game.vgm  --seconds 20 --press 15:4@2   # joystick trigger A
+
+# boot diagnostics: mapper, hooks, high-RAM writes
+MsxAudioTool probe "rom.msx" --mapper konami-scc
 ```
 
-Status: **works** (it boots King's Valley II, runs the driver, captures ~97k writes in 100 s and
-renders audio), but the VDP vblank flag/status is not modelled yet, so the driver runs ~6% off the
-hardware tempo and the loop is not detected. The `extract` path (openMSX) remains the bit-exact
-reference.
+Status: King's Valley II works through its profile (interrupt-driven driver, ~97k writes in 100 s,
+audio renders). King's Valley 1 boots, the mapper/keyboard/joystick are modelled and its sound player
+is identified, but its game state machine waits on BIOS behaviour that the minimal machine does not
+model yet, so the title music is not started. The next step is finishing the main-loop/BIOS model (or
+providing a KV1 profile with the song-load routine). The `extract` path (openMSX) remains the
+bit-exact reference.
 
 ## CLI
 

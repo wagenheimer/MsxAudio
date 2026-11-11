@@ -32,10 +32,13 @@ public static class DirectRomExtractor
 
         RomExtractionProfile profile = options.Profile;
         byte[] rom = File.ReadAllBytes(options.RomPath);
-        var machine = new MiniMsx(rom);
+        RomMapper mapper = RomMapperNames.Parse(profile.RomType);
+        var machine = new MiniMsx(rom, mapper);
 
         bool hooked = machine.Boot();
-        log?.Invoke($"boot: PC={machine.Pc:X4}, H.TIMI={machine.InterruptHook:X4}, " +
+        var (resolvedMapper, scc) = machine.CartridgeInfo;
+        log?.Invoke($"boot: PC={machine.Pc:X4}, hook={machine.InterruptHook:X4}, " +
+                    $"mapper={RomMapperNames.Name(resolvedMapper)}{(scc ? " +SCC" : "")}, " +
                     $"sound call={profile.SoundCallAddress:X4}");
 
         if (!hooked)

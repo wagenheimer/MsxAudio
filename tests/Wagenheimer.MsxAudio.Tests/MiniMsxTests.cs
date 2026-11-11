@@ -21,7 +21,7 @@ public class MiniMsxTests
     [Fact]
     public void Boot_RunsInitAndCapturesPsgAndSccWrites()
     {
-        var machine = new MiniMsx(BuildRom());
+        var machine = new MiniMsx(BuildRom(), RomMapper.KonamiScc);
         machine.ResetCapture();
 
         machine.Boot();
@@ -39,7 +39,7 @@ public class MiniMsxTests
     [Fact]
     public void TriggerSound_PassesTheIdInRegisterA()
     {
-        var machine = new MiniMsx(BuildRom());
+        var machine = new MiniMsx(BuildRom(), RomMapper.KonamiScc);
         machine.Boot();
         machine.ResetCapture();
 
@@ -54,14 +54,67 @@ public class MiniMsxTests
     [Fact]
     public void MemoryMapper_SwitchesBanks()
     {
-        var machine = new MiniMsx(BuildRom());
+        var machine = new MiniMsx(BuildRom(), RomMapper.KonamiScc);
 
-        // bank 1 (0x6000) is selected by a write to 0x7000
+        // Konami mapper: 0x7000 selects the bank at 0x6000 (confirmed by the disassembly).
         machine.Write(0x7000, 1);
         Assert.Equal(0x11, machine.Memory(0x6000));
 
         machine.Write(0x7000, 2);
         Assert.Equal(0x22, machine.Memory(0x6000));
+    }
+
+    [Fact]
+    public void LinearCartridge_MapsOnlyTheFirstWindow()
+    {
+        var rom = new byte[0x4000];
+        rom[0] = (byte)'A';
+        rom[1] = (byte)'B';
+        rom[0x1000] = 0x5A;
+
+        var machine = new MiniMsx(rom, RomMapper.Linear);
+        Assert.Equal(0x5A, machine.Memory(0x5000));
+        Assert.Equal(0xFF, machine.Memory(0x8000)); // open bus above a 16 KB cartridge
+        Assert.Equal(RomMapper.Linear, machine.CartridgeInfo.Mapper);
+    }
+
+    [Fact]
+    public void Ascii8Mapper_SwitchesBanks()
+    {
+        var rom = new byte[0x10000]; // 64 KB = 8 banks of 8 KB
+        rom[0x2000] = 0x33;
+        rom[0x4000] = 0x44;
+
+        var machine = new MiniMsx(rom, RomMapper.Ascii8);
+        machine.Write(0x6000, 1);
+        Assert.Equal(0x33, machine.Memory(0x4000));
+
+        machine.Write(0x6000, 2);
+        Assert.Equal(0x44, machine.Memory(0x4000));
+    }
+
+    [Fact]
+    public void VdpStatus_LatchesVBlankAndClearsOnRead()
+    {
+        var machine = new MiniMsx(BuildRom(), RomMapper.KonamiScc);
+
+        machine.Frame();
+        Assert.Equal(0x80, machine.ReadPort(0x99) & 0x80);   // vblank flag
+        Assert.Equal(0x80, machine.Memory(0xF3E7) & 0x80);   // BIOS STATFL mirrors the last read
+        Assert.Equal(0x00, machine.ReadPort(0x99) & 0x80);   // cleared by the read
+    }
+
+    [Fact]
+    public void KeyboardMatrix_SelectsRowsAndReadsPressedBits()
+    {
+        var machine = new MiniMsx(BuildRom(), RomMapper.KonamiScc);
+
+        machine.PressKey(8, 0, true);            // Space
+        machine.WritePort(0xA8, 8);
+        Assert.Equal(0xFE, machine.ReadPort(0xA9));
+
+        machine.ReleaseAllKeys();
+        Assert.Equal(0xFF, machine.ReadPort(0xA9));
     }
 
     private void Dump(VgmFile vgm)
