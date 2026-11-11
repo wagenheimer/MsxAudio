@@ -196,6 +196,7 @@ internal static class Program
 
         bool trace = (Value(args, "--trace") ?? "").Equals("1", StringComparison.OrdinalIgnoreCase);
         int frames = Math.Max(1, (int)Math.Round(seconds * 60));
+        int budget = int.TryParse(Value(args, "--budget") ?? "", out int parsedBudget) ? parsedBudget : 200_000;
 
         for (int frame = 0; frame < frames; frame++)
         {
@@ -205,14 +206,16 @@ internal static class Program
                 else if (frame == press.Frame + 12) machine.PressKey(press.Row, press.Mask, false);
             }
 
-            machine.Frame();
+            machine.Frame(budget);
 
             if (trace && frame % 60 == 0)
             {
                 Console.WriteLine($"  t={frame / 60,3}s E000={machine.Memory(0xE000):X2} " +
                                   $"E002={machine.Memory(0xE002):X2} E003={machine.Memory(0xE003):X2} " +
                                   $"E005={machine.Memory(0xE005):X2} E008={machine.Memory(0xE008):X2} " +
-                                  $"E009={machine.Memory(0xE009):X2} events={machine.EventCount}");
+                                  $"E009={machine.Memory(0xE009):X2} events={machine.EventCount}" +
+                                  $" hookPC={machine.HookPc:X4}" +
+                                  (machine.HookBudgetExhausted ? " EXHAUSTED" : ""));
             }
         }
 
@@ -243,6 +246,14 @@ internal static class Program
 
         for (int i = 0; i < 5; i++) machine.Frame();
         Console.WriteLine($"after 5 frames: KEYI={machine.KeyHook:X4}, TIMI={machine.TimerHook:X4}, PC={machine.Pc:X4}");
+
+        // Where does the interrupt hook spend its budget? A driver that never returns is waiting on
+        // hardware the minimal machine does not model, and the hot addresses show where.
+        var profile = machine.ProfileHook(400_000);
+        Console.WriteLine($"hook profile: returned={profile.Returned}, stopped at {profile.Pc:X4}");
+        foreach (var (address, hits) in profile.Hot)
+            Console.WriteLine($"  {address:X4}: {hits} samples");
+
         return 0;
     }
 

@@ -93,6 +93,12 @@ public sealed class MiniMsx
     /// <summary>Program counter of the emulated CPU (diagnostics).</summary>
     public ushort Pc => _cpu.Registers.PC;
 
+    /// <summary>Program counter of the interrupt-hook CPU (diagnostics).</summary>
+    public ushort HookPc => _isrCpu.Registers.PC;
+
+    /// <summary>True when the last <see cref="Frame"/> exhausted the budget inside an interrupt hook.</summary>
+    public bool HookBudgetExhausted { get; private set; }
+
     /// <summary>
     /// Address of the interrupt hook that runs the driver, or 0 when none is installed.
     /// </summary>
@@ -132,6 +138,8 @@ public sealed class MiniMsx
     /// <summary>Runs the game's interrupt handlers and the main program for one 60 Hz frame.</summary>
     public void Frame(int maxInstructions = 200_000)
     {
+        HookBudgetExhausted = false;
+
         // VDP vblank: status bit 7 is latched until the status port is read, and the BIOS mirrors
         // it in STATFL (0xF3E7), which many drivers test instead of reading the port.
         _vdpStatus = 0x80;
@@ -143,10 +151,20 @@ public sealed class MiniMsx
         Write(0xFC9E, (byte)(jiffy & 0xFF));
         Write(0xFC9F, (byte)(jiffy >> 8));
 
-        // The BIOS interrupt handler calls both hooks, H.KEYI first and then H.TIMI.
+        // The BIOS interrupt handler calls both hooks, H.KEYI first and then H.TIMI. A handler that
+        // does not fit the per-frame budget keeps running into the next frame (hardware overrun),
+        // instead of being restarted — restarting it left the game's re-entry guard set forever.
         int hookBudget = Math.Max(2000, maxInstructions / 3);
-        CallHook(KeyHook, hookBudget);
-        CallHook(TimerHook, hookBudget);
+        if (_hookRunning)
+        {
+            ResumeHook(hookBudget);
+        }
+        else
+        {
+            CallHook(KeyHook, hookBudget);
+            if (!_hookRunning)
+                CallHook(TimerHook, hookBudget);
+        }
 
         // Games whose music starts in the main program (not in a hook) need it to keep running.
         if (_mainRunning)
@@ -156,6 +174,10 @@ public sealed class MiniMsx
     }
 
     private bool _mainRunning;
+    private bool _hookRunning;
+
+    /// <summary>Return address (sentinel) used by the interrupt-hook CPU.</summary>
+    private const ushort HookSentinel = 0x0002;
 
     private void CallHook(ushort address, int maxInstructions)
     {
@@ -163,20 +185,91 @@ public sealed class MiniMsx
             return;
 
         var registers = (Z80Registers)_isrCpu.Registers;
-        const ushort sentinel = 0x0002;
 
         registers.SP = unchecked((short)0xFF00);
         registers.SP -= 2;
-        WriteWord((ushort)registers.SP, sentinel);
+        WriteWord((ushort)registers.SP, HookSentinel);
         registers.PC = address;
+
+        _hookRunning = true;
+        ResumeHook(maxInstructions);
+    }
+
+    /// <summary>
+    /// Runs (or continues) the interrupt handler for up to <paramref name="maxInstructions"/>.
+    /// </summary>
+    /// <remarks>
+    /// A game whose handler overruns the frame budget continues it on the next frame, exactly like
+    /// the hardware, where the CPU stays inside the interrupt (and the game's own re-entry flag
+    /// stays set) until the handler returns. Restarting the handler mid-way instead left games such
+    /// as King's Valley 1 stuck: their handler sets a guard byte it only clears on the way out.
+    /// </remarks>
+    private void ResumeHook(int maxInstructions)
+    {
+        var registers = (Z80Registers)_isrCpu.Registers;
 
         for (int i = 0; i < maxInstructions; i++)
         {
-            if (registers.PC == sentinel)
-                break;
+            if (registers.PC == HookSentinel)
+            {
+                _hookRunning = false;
+                return;
+            }
 
             Step(_isrCpu);
         }
+
+        HookBudgetExhausted = true;
+    }
+
+    /// <summary>
+    /// Runs the interrupt hook for diagnostics and reports where it spent its time (or whether it
+    /// returned). Useful to find a driver that waits on hardware the minimal machine does not model.
+    /// </summary>
+    /// <param name="maxInstructions">Instruction budget.</param>
+    /// <param name="top">How many hot addresses to report.</param>
+    public (bool Returned, ushort Pc, IReadOnlyList<(ushort Address, int Hits)> Hot)
+        ProfileHook(int maxInstructions = 200_000, int top = 8)
+    {
+        ushort hook = KeyHook != 0 ? KeyHook : TimerHook;
+        if (hook == 0)
+            return (true, 0, Array.Empty<(ushort, int)>());
+
+        var registers = (Z80Registers)_isrCpu.Registers;
+        _hookRunning = false;
+
+        registers.SP = unchecked((short)0xFF00);
+        registers.SP -= 2;
+        WriteWord((ushort)registers.SP, HookSentinel);
+        registers.PC = hook;
+
+        var hits = new Dictionary<ushort, int>();
+        bool returned = false;
+
+        for (int i = 0; i < maxInstructions; i++)
+        {
+            if (registers.PC == HookSentinel)
+            {
+                returned = true;
+                break;
+            }
+
+            if ((i & 7) == 0)
+            {
+                ushort pc = registers.PC;
+                hits[pc] = hits.TryGetValue(pc, out int n) ? n + 1 : 1;
+            }
+
+            Step(_isrCpu);
+        }
+
+        var hottest = new List<(ushort Address, int Hits)>(hits.Count);
+        foreach (var pair in hits)
+            hottest.Add((pair.Key, pair.Value));
+
+        hottest.Sort((a, b) => b.Hits.CompareTo(a.Hits));
+
+        return (returned, registers.PC, hottest.GetRange(0, Math.Min(top, hottest.Count)));
     }
 
     /// <summary>Executes the main program for up to <paramref name="maxInstructions"/> instructions.</summary>

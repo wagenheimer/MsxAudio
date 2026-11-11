@@ -11,11 +11,9 @@ namespace Wagenheimer.MsxAudio.Extraction;
 /// no external emulator.
 /// </summary>
 /// <remarks>
-/// <para><b>Experimental.</b> The cartridge boots, installs its interrupt hook and the driver runs,
-/// but the minimal machine does not model the VDP vblank flag/status precisely yet, so the driver
-/// advances slightly off the hardware cadence (a ~6% tempo difference on King's Valley II) and the
-/// loop is not detected. Use <see cref="OpenMsxRomExtractor"/> for bit-exact reference captures.</para>
-
+/// <para>The cartridge boots, installs its interrupt hook and the driver runs; the minimal machine
+/// models the VDP vblank flag/status and the BIOS entry points the drivers use, so the cadence matches
+/// the hardware. Use <see cref="OpenMsxRomExtractor"/> for bit-exact reference captures.</para>
 /// <para>The <see cref="MiniMsx"/> boots the cartridge, then each id is captured by calling the game's
 /// "play sound" routine and running the interrupt handler at 60 Hz for the requested duration.
 /// The captured PSG/SCC register writes become a VGM (and therefore a <c>.msxaudio</c> entry),
