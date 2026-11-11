@@ -62,6 +62,7 @@ public sealed class VisualizerGame : Game
     private readonly float[] _fftMagnitude = new float[FftSize / 2];
     private readonly float[] _fftWindow = Fft.HannWindow(FftSize);
     private readonly float[] _bars = new float[SpectrumBars];
+    private readonly float[] _barPeak = new float[SpectrumBars];
     private readonly float[] _peakHold = new float[8];
     private readonly float[] _wave = new float[32];
 
@@ -94,11 +95,18 @@ public sealed class VisualizerGame : Game
     private const double RollSeconds = 12.0;
     private const double NoteTailSeconds = 0.09;
 
+    // One distinct, saturated colour per channel. PSG uses warm hues, SCC uses cool ones, so the
+    // chip is recognisable at a glance while every channel is still told apart (roll, piano, strips).
     private static readonly Color[] ChannelColors =
     {
-        new(79, 195, 247), new(41, 182, 246), new(129, 212, 250),
-        new(126, 240, 130), new(76, 217, 100), new(0, 200, 83),
-        new(168, 230, 163), new(0, 150, 136),
+        new(255, 107, 107),   // PSG1 red
+        new(255, 169, 77),    // PSG2 orange
+        new(255, 212, 59),    // PSG3 yellow
+        new(105, 219, 124),   // SCC1 green
+        new(56, 217, 169),    // SCC2 mint
+        new(77, 171, 247),    // SCC3 blue
+        new(151, 117, 250),   // SCC4 violet
+        new(247, 131, 172),   // SCC5 pink
     };
     private string _status = string.Empty;
     private float _statusTimer;
@@ -146,6 +154,12 @@ public sealed class VisualizerGame : Game
         int windowWidth = VW, int windowHeight = VH, AudioProfile? profile = null, string? startView = null)
     {
         _profile = profile ?? AudioProfile.Stereo;
+
+        // A screenshot gate must not depend on the audio device pacing the buffers: one update per
+        // drawn frame, each advancing a fixed 1/60 s (see AdvanceForScreenshot).
+        if (_shotPending)
+            IsFixedTimeStep = false;
+
         _view = startView?.ToLowerInvariant() switch
         {
             "roll" or "pianoroll" => PanelView.Roll,
@@ -334,6 +348,7 @@ public sealed class VisualizerGame : Game
             ClearNotes();
             _statusTimer = 3f;
             Array.Clear(_bars);
+            Array.Clear(_barPeak);
             Array.Clear(_peakHold);
         }
         catch (Exception ex)
@@ -367,10 +382,13 @@ public sealed class VisualizerGame : Game
 
             if (!_paused)
             {
-                if (_player.Finished && _autoNext && _tracks.Count > 0)
+                if (!_shotPending && _player.Finished && _autoNext && _tracks.Count > 0)
                     LoadTrack((_selected + 1) % _tracks.Count);
 
-                Feed();
+                if (_shotPending)
+                    AdvanceForScreenshot();
+                else
+                    Feed();
             }
             else
             {
@@ -441,9 +459,30 @@ public sealed class VisualizerGame : Game
         }
     }
 
-    private void Feed()
+    /// <summary>
+    /// Deterministic advance for the screenshot gate: exactly 1/60 s of music per drawn frame, so
+    /// frame N always shows the same moment (the audio device is not asked to pace anything).
+    /// </summary>
+    private void AdvanceForScreenshot()
     {
-        if (_sound is null || _player is null)
+        if (_player is null)
+            return;
+
+        int remaining = 48000 / 60;
+        while (remaining > 0)
+        {
+            int chunk = Math.Min(ChunkFrames, remaining);
+            _player.Render(_render, chunk);
+            remaining -= chunk;
+        }
+
+        UpdateSpectrum();
+        UpdateMeters(1f / 60f);
+        UpdateNotes();
+    }
+
+    private void Feed()
+    {        if (_sound is null || _player is null)
             return;
 
         int guard = 0;
@@ -991,6 +1030,7 @@ public sealed class VisualizerGame : Game
             float norm = Math.Clamp((db + 60f) / 60f, 0f, 1f);
 
             _bars[b] = Math.Max(norm, _bars[b] - 0.03f);
+            _barPeak[b] = Math.Max(norm, _barPeak[b] - 0.008f);
         }
     }
 
@@ -1233,12 +1273,18 @@ public sealed class VisualizerGame : Game
         {
             float value = Math.Clamp(_bars[b], 0f, 1f);
             int barH = (int)(value * innerH);
-            if (barH <= 0) continue;
-
             int bx = left + (int)(b * barW);
             int bw = Math.Max(1, (int)barW - 1);
-            var color = Color.Lerp(PsgColor, SccColor, b / (float)SpectrumBars);
-            Rect(bx, top + innerH - barH, bw, barH, color);
+
+            if (barH > 0)
+            {
+                var color = Color.Lerp(PsgColor, SccColor, b / (float)SpectrumBars);
+                Rect(bx, top + innerH - barH, bw, barH, color);
+            }
+
+            // Peak hold: a bright cap that falls slowly, so short transients stay visible.
+            int peakY = top + innerH - (int)(Math.Clamp(_barPeak[b], 0f, 1f) * innerH);
+            Rect(bx, Math.Clamp(peakY, top, top + innerH - 1), bw, 2, new Color(235, 244, 252));
         }
     }
 
@@ -1295,6 +1341,17 @@ public sealed class VisualizerGame : Game
             bool black = Notes[midi % 12].Contains('#');
             Rect(x + 10, RowY(midi), gutter - 2, RowH(),
                 black ? new Color(44, 52, 64) : new Color(140, 152, 166));
+        }
+
+        // Alternate octave bands, so the pitch is readable at a glance.
+        for (int midi = lowMidi; midi < highMidi; midi += 12)
+        {
+            if (((midi / 12) & 1) != 0)
+                continue;
+
+            int y0 = RowY(midi + 12);
+            int y1 = RowY(midi);
+            Rect(left, y0, innerW, Math.Max(1, y1 - y0), new Color(20, 27, 38));
         }
 
         for (int midi = lowMidi; midi <= highMidi; midi += 12)
@@ -1389,6 +1446,9 @@ public sealed class VisualizerGame : Game
                 : Color.Lerp(ChannelColors[ch], PanelColor, 0.7f);
 
             DrawButton(rect, ChannelName(ch), _pianoChannel == ch, color);
+
+            // Always show the channel colour as a swatch, even when the button is not selected.
+            Rect(rect.X + 3, rect.Y + 3, 3, rect.Height - 6, color);
         }
 
         _pianoAllHit = new Rectangle(x + 10 + 8 * 46 + 8, rowY, 80, 16);
@@ -1470,7 +1530,8 @@ public sealed class VisualizerGame : Game
             Text("C" + (midi / 12 - 1), rect.X + (rect.Width - 12) / 2, rect.Bottom - 26, new Color(70, 82, 96));
         }
 
-        // Song notes: one coloured bar per channel, stacked at the bottom of the key.
+        // Song notes: a translucent wash over the whole key plus one solid band per channel, so the
+        // lit keys are readable from across the room (the old 4 px bars were too subtle).
         for (int midi = _pianoBaseMidi; midi < _pianoBaseMidi + 36; midi++)
         {
             int mask = _keyLit[midi];
@@ -1481,23 +1542,45 @@ public sealed class VisualizerGame : Game
             if (rect.IsEmpty)
                 continue;
 
+            int first = 0;
+            while (first < 8 && (mask & (1 << first)) == 0)
+                first++;
+
+            var wash = ChannelColors[first] * 0.45f;
+            Rect(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2, wash);
+
+            int bands = 0;
+            for (int ch = 0; ch < 8; ch++)
+                if ((mask & (1 << ch)) != 0)
+                    bands++;
+
+            int bandH = bands > 1 ? 7 : 12;
             int band = 0;
+
             for (int ch = 0; ch < 8; ch++)
             {
                 if ((mask & (1 << ch)) == 0)
                     continue;
 
-                Rect(rect.X + 2, rect.Bottom - 8 - band * 4, rect.Width - 4, 4, ChannelColors[ch]);
+                int by = rect.Bottom - 2 - bandH - band * (bandH + 1);
+                Rect(rect.X + 2, by, rect.Width - 4, bandH, ChannelColors[ch]);
+
+                // Dark outline keeps the band readable even on a white key.
+                Rect(rect.X + 2, by, rect.Width - 4, 1, Background);
                 band++;
             }
         }
 
-        // Audition note marker.
+        // Audition note: outline the whole key so the note being played stands out.
         if (auditionNote is >= 0 and < 128)
         {
             var rect = _pianoKeyRect[auditionNote];
             if (!rect.IsEmpty)
-                Rect(rect.X, rect.Y, rect.Width, 3, Accent);
+            {
+                Rect(rect.X, rect.Y, 2, rect.Height, Accent);
+                Rect(rect.Right - 2, rect.Y, 2, rect.Height, Accent);
+                Rect(rect.X, rect.Y, rect.Width, 4, Accent);
+            }
         }
 
         var target = player.Channels[_pianoChannel];
@@ -1593,7 +1676,7 @@ public sealed class VisualizerGame : Game
         const int x = 336, y = 436, w = VW - 348, h = 222;
         Panel(x, y, w, h);
         Text("CHANNELS", x + 10, y + 6, Accent);
-        Text("CLICK: TRACK / SEEK BAR / LABEL = SOLO   S = SOLO   M = MUTE", x + 110, y + 6, Dim);
+        Text("COLOUR = CHANNEL   CLICK LABEL = SOLO   S = SOLO   M = MUTE", x + 96, y + 6, Dim);
 
         int stripW = (w - 20) / 8;
         int stripY = y + 24;
@@ -1607,15 +1690,19 @@ public sealed class VisualizerGame : Game
             bool soloed = _player.SoloChannel == ch;
             bool audible = IsAudible(ch);
 
-            var color = isPsg ? PsgColor : SccColor;
+            // The strip is painted with the same colour the channel uses in the roll and the piano.
+            var color = ChannelColors[ch];
             if (!audible) color = Dim;
 
             int sx = x + 10 + ch * stripW;
             _stripHit[ch] = new Rectangle(sx + 2, stripY, stripW - 4, 20);
 
             Panel(sx + 2, stripY, stripW - 4, stripH, PanelHi);
+            Rect(sx + 4, stripY + 19, stripW - 8, 2, color);
 
-            Text(isPsg ? $"PSG{info.Number}" : $"SCC{info.Number}", sx + 8, stripY + 6, color);
+            // Colour key: filled square + name in the channel colour.
+            Rect(sx + 8, stripY + 6, 6, 6, color);
+            Text(isPsg ? $"PSG{info.Number}" : $"SCC{info.Number}", sx + 18, stripY + 6, color);
 
             var soloRect = new Rectangle(sx + stripW - 38, stripY + 4, 14, 12);
             var muteRect = new Rectangle(sx + stripW - 20, stripY + 4, 14, 12);
@@ -1663,6 +1750,7 @@ public sealed class VisualizerGame : Game
                 Rect(scopeX, waveY + waveH / 2, scopeW, 1, Grid);
                 _player.CopySccWave(ch - 3, _wave);
 
+                var waveColor = Color.Lerp(color, Color.White, 0.3f);
                 int stepX = Math.Max(1, scopeW / 32);
                 for (int i = 0; i < 32; i++)
                 {
@@ -1670,7 +1758,7 @@ public sealed class VisualizerGame : Game
                     int py = waveY + waveH / 2 - (int)(_wave[i] * waveH / 2);
                     py = Math.Clamp(py, waveY, waveY + waveH - 1);
                     Rect(px, Math.Min(py, waveY + waveH / 2), Math.Max(1, stepX - 1),
-                        Math.Max(1, Math.Abs(py - (waveY + waveH / 2))), color);
+                        Math.Max(1, Math.Abs(py - (waveY + waveH / 2))), waveColor);
                 }
             }
 
@@ -1834,6 +1922,7 @@ public sealed class VisualizerGame : Game
 
     private int _frame;
     private bool _shotDone;
+    private readonly bool _shotPending = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("MSXAUDIO_SHOT"));
 
     private void TryScreenshot()
     {

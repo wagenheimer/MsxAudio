@@ -136,8 +136,8 @@ In the **piano** view:
 What you see:
 
 - **POSITION** bar with `current / total`, the loop window and a marker — click or drag to seek;
-- **SPECTRUM** in **dB** (`0` to `-60 dB`) with a frequency axis at **100 Hz / 1 kHz / 10 kHz**, so the
-  quiet harmonics are visible instead of being flattened;
+- **SPECTRUM** in **dB** (`0` to `-60 dB`) with a frequency axis at **100 Hz / 1 kHz / 10 kHz** and
+  **peak-hold caps**, so the quiet harmonics and short transients stay visible;
 - **PIANO ROLL**: the last 12 s with a **mini keyboard** on the left, octave lines, time grid, one
   colour per channel, and a short tail on every note so fast arpeggios stay **stacked as chords**;
   muted/soloed channels draw dimmed;
@@ -148,8 +148,10 @@ What you see:
   its keys and fades its selector, so the keyboard shows exactly what is being heard;
 - the **MASTER** oscilloscope and the per-channel scopes draw a **min/max envelope** per pixel column,
   so peaks stay visible instead of being averaged away;
-- one strip per channel (PSG blue, SCC green) with live oscilloscope, volume, level with **peak
-  hold**, frequency, nearest **note**, key state and — for SCC — the **32-sample wave RAM**;
+- one strip per channel with live oscilloscope, volume, level with **peak hold**, frequency, nearest
+  **note**, key state and — for SCC — the **32-sample wave RAM**. Each channel has its **own colour**
+  (PSG warm, SCC cool) and the strip is painted with it — the strip header works as the legend for the
+  roll and the piano, which use the same palette;
 - **Solo** by clicking a channel label (or its `S` button) and **Mute** through the `M` button.
 
 The UI renders to a fixed **1280×720** render target and is letterboxed into the window, so
