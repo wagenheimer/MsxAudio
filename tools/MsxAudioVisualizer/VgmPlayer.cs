@@ -165,9 +165,13 @@ public sealed class VgmPlayer : IDisposable
         _scc.Reset();
         _decimator.Reset();
         _eventIndex = 0;
-        _internalPos = 0;
         _timeShift = 0;
         _samplePos = (long)Math.Clamp(seconds * 44100.0, 0, _vgm.TotalSamples);
+
+        // The internal timeline must be aligned with the VGM samples, otherwise the next writes are
+        // considered "far in the future" and the chips stay frozen (the music is lost after a seek).
+        _internalPos = (long)Math.Round(_samplePos * ((double)SampleRate * _oversample / 44100.0));
+
         _finished = false;
         Array.Clear(_psgRegs);
         Array.Clear(_sccPeriod);

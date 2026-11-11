@@ -86,6 +86,8 @@ player.Update();                           // mantém a fila de buffers cheia
 
 ## Player visual (MonoGame)
 
+<p align="center"><img src="docs/media/visualizer.gif" alt="MSX Audio Visualizer playing a VGM" width="900"></p>
+
 `tools/MsxAudioVisualizer` é um player gráfico que abre um **VGM** (arquivo, pasta ou *drag & drop*),
 toca em tempo real e mostra tudo o que os chips estão fazendo:
 
@@ -117,8 +119,9 @@ dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
 MSXAUDIO_SHOT=shot.png MSXAUDIO_SHOT_FRAME=200 dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
 ```
 
-A janela é redimensionável/maximizável (a UI é escalada a partir do canvas 1280x720) e aceita
-tamanho inicial. Para gravar a sessão:
+A janela é redimensionável/maximizável: a UI é desenhada num **RenderTarget 1280×720** e
+letterboxed na janela, então nada sai do lugar em nenhum tamanho. Também aceita tamanho inicial.
+Para gravar a sessão:
 
 ```bash
 # GIF (encoder embutido, sem ffmpeg) — 640x360

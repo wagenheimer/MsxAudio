@@ -48,6 +48,7 @@ public sealed class VisualizerGame : Game
 
     private SpriteBatch _batch = null!;
     private Texture2D _pixel = null!;
+    private RenderTarget2D _target = null!;
 
     private readonly List<string> _tracks = new();
     private int _selected;
@@ -141,7 +142,7 @@ public sealed class VisualizerGame : Game
             {
                 _gifWidth = VW / 2;
                 _gifHeight = VH / 2;
-                _gifFactor = Math.Max(1, _graphics.PreferredBackBufferWidth / _gifWidth);
+                _gifFactor = Math.Max(1, VW / _gifWidth);
                 _gif = new GifEncoder(_recordPath, _gifWidth, _gifHeight, _recordFps);
             }
         }
@@ -186,6 +187,7 @@ public sealed class VisualizerGame : Game
         _batch = new SpriteBatch(GraphicsDevice);
         _pixel = new Texture2D(GraphicsDevice, 1, 1);
         _pixel.SetData(new[] { Color.White });
+        _target = new RenderTarget2D(GraphicsDevice, VW, VH, false, SurfaceFormat.Color, DepthFormat.None);
     }
 
     private void ScanTracks(string dir)
@@ -489,16 +491,14 @@ public sealed class VisualizerGame : Game
 
     protected override void Draw(GameTime gameTime)
     {
-        GraphicsDevice.Clear(Background);
-
         int w = GraphicsDevice.PresentationParameters.BackBufferWidth;
         int h = GraphicsDevice.PresentationParameters.BackBufferHeight;
-        _scale = Math.Min(w / (float)VW, h / (float)VH);
-        _offX = (w - VW * _scale) / 2f;
-        _offY = (h - VH * _scale) / 2f;
 
-        _batch.Begin(samplerState: SamplerState.PointClamp,
-            transformMatrix: Matrix.CreateScale(_scale) * Matrix.CreateTranslation(_offX, _offY, 0f));
+        // UI always renders on a fixed 1280x720 target, so resizing/maximising never moves anything.
+        GraphicsDevice.SetRenderTarget(_target);
+        GraphicsDevice.Clear(Background);
+
+        _batch.Begin(samplerState: SamplerState.PointClamp);
 
         DrawHeader();
         DrawSeekBar();
@@ -521,6 +521,21 @@ public sealed class VisualizerGame : Game
             DrawHelp();
 
         _batch.End();
+
+        // Letterbox the target into the window.
+        GraphicsDevice.SetRenderTarget(null);
+        GraphicsDevice.Clear(Background);
+
+        _scale = Math.Min(w / (float)VW, h / (float)VH);
+        int destW = Math.Max(1, (int)(VW * _scale));
+        int destH = Math.Max(1, (int)(VH * _scale));
+        _offX = (w - destW) / 2f;
+        _offY = (h - destH) / 2f;
+
+        _batch.Begin(samplerState: SamplerState.LinearClamp);
+        _batch.Draw(_target, new Rectangle((int)_offX, (int)_offY, destW, destH), Color.White);
+        _batch.End();
+
         base.Draw(gameTime);
 
         if (_recording)
@@ -892,12 +907,12 @@ public sealed class VisualizerGame : Game
         Exit();
     }
 
-    private Color[] ReadBackBuffer(out int w, out int h)
+    private Color[] ReadFrame(out int w, out int h)
     {
-        w = GraphicsDevice.PresentationParameters.BackBufferWidth;
-        h = GraphicsDevice.PresentationParameters.BackBufferHeight;
-        var data = new Color[w * h];
-        GraphicsDevice.GetBackBufferData(data);
+        w = VW;
+        h = VH;
+        var data = new Color[VW * VH];
+        _target.GetData(data);
         return data;
     }
 
@@ -931,7 +946,7 @@ public sealed class VisualizerGame : Game
     {
         try
         {
-            var data = ReadBackBuffer(out int w, out int h);
+            var data = ReadFrame(out int w, out int h);
 
             using var texture = new Texture2D(GraphicsDevice, w, h);
             texture.SetData(data);
@@ -954,7 +969,7 @@ public sealed class VisualizerGame : Game
 
         if (_gif is not null)
         {
-            var frame = ReadBackBuffer(out int w, out int h);
+            var frame = ReadFrame(out int w, out int h);
             var small = Downscale(frame, w, h, _gifFactor, out int dw, out int dh);
             _gif.AddFrame(small, dw, dh);
         }
