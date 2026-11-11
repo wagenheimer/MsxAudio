@@ -56,10 +56,12 @@ public static class Library
     }
 
     /// <summary>
-    /// Scans <paramref name="root"/> for <c>*.vgm</c>. <paramref name="progress"/> receives the file
-    /// count every few hits (called from the worker thread; keep it cheap).
+    /// Scans <paramref name="root"/> for <paramref name="pattern"/> (VGM by default).
+    /// <paramref name="progress"/> receives the file count every few hits (called from the worker
+    /// thread; keep it cheap).
     /// </summary>
-    public static ScanResult Scan(string root, bool recursive, CancellationToken token, Action<int>? progress = null)
+    public static ScanResult Scan(string root, bool recursive, CancellationToken token,
+        Action<int>? progress = null, string pattern = "*.vgm")
     {
         var result = new ScanResult { Root = root, Recursive = recursive };
 
@@ -74,7 +76,7 @@ public static class Library
             if (!recursive)
             {
                 result.Folders = 1;
-                foreach (string file in Directory.EnumerateFiles(root, "*.vgm"))
+                foreach (string file in Directory.EnumerateFiles(root, pattern))
                 {
                     token.ThrowIfCancellationRequested();
                     result.Files.Add(Entry(file));
@@ -107,7 +109,7 @@ public static class Library
 
                     try
                     {
-                        foreach (string file in Directory.EnumerateFiles(dir, "*.vgm"))
+                        foreach (string file in Directory.EnumerateFiles(dir, pattern))
                         {
                             token.ThrowIfCancellationRequested();
                             result.Files.Add(Entry(file));

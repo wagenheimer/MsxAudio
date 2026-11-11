@@ -24,6 +24,10 @@ public sealed class VisualizerSettings
     public int WindowWidth { get; set; } = 1280;
     public int WindowHeight { get; set; } = 720;
     public bool PixelPerfect { get; set; }
+    public string? LastRom { get; set; }
+    public string? LastRomKeys { get; set; }
+    public int LastRomMapper { get; set; }
+    public int LastRomSeconds { get; set; } = 30;
 
     private const int MaxRecent = 8;
 

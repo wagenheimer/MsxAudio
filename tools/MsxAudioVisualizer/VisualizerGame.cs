@@ -239,6 +239,10 @@ public sealed partial class VisualizerGame : Game
 
         Window.ClientSizeChanged += (_, _) => ApplyWindowSize();
 
+        // Typing into the extraction dialog (path and key script) goes through the window, so accented
+        // characters and the keyboard layout work as the user expects.
+        Window.TextInput += (_, e) => OnExtractTextInput(e.Character);
+
         Exiting += (_, _) => SaveSettings();
 
         if (!string.IsNullOrWhiteSpace(_recordPath))
@@ -287,6 +291,19 @@ public sealed partial class VisualizerGame : Game
                 OpenProfileDialog();
             else if (dialog.Equals("help", StringComparison.OrdinalIgnoreCase))
                 _showHelp = true;
+            else if (dialog.Equals("rom", StringComparison.OrdinalIgnoreCase))
+            {
+                OpenExtractDialog();
+                OpenRomBrowser();
+            }
+            else if (dialog.Equals("extract", StringComparison.OrdinalIgnoreCase))
+            {
+                OpenExtractDialog();
+
+                // Docs/CI gate: start the capture without a click (MSXAUDIO_EXTRACT=1).
+                if (Environment.GetEnvironmentVariable("MSXAUDIO_EXTRACT") is { Length: > 0 })
+                    StartExtraction();
+            }
         }
 
         // Recording starts with audio already flowing, so the first frame is not empty. This chunk
@@ -346,6 +363,7 @@ public sealed partial class VisualizerGame : Game
             HandleInput();
 
         PollScan();
+        PollExtraction();
 
         if (_dialog != DialogKind.None)
             PollDialogScan();

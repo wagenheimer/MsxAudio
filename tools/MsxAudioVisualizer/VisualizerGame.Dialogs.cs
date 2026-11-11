@@ -13,7 +13,7 @@ namespace Wagenheimer.MsxAudio.Visualizer;
 
 public sealed partial class VisualizerGame : Game
 {
-    private enum DialogKind { None, Folder, Profile }
+    private enum DialogKind { None, Folder, Profile, Extract }
 
     private DialogKind _dialog;
 
@@ -34,6 +34,8 @@ public sealed partial class VisualizerGame : Game
     private Task<ScanResult>? _browserScan;
     private CancellationTokenSource? _browserCts;
     private int _browserWheel;
+    private string _browserPattern = "*.vgm";
+    private bool _browserPickRom;
     private readonly List<(Rectangle Rect, int Index)> _browserDirHit = new();
     private readonly List<(Rectangle Rect, int Index)> _browserFileHit = new();
     private readonly List<(Rectangle Rect, string Path)> _browserCrumbHit = new();
@@ -56,8 +58,31 @@ public sealed partial class VisualizerGame : Game
                 : Directory.GetCurrentDirectory();
 
         _dialog = DialogKind.Folder;
+        _browserPattern = "*.vgm";
+        _browserPickRom = false;
         _browserRecursive = _settings.Recursive;
         _browserFocusFiles = false;
+        _browserWheel = _mouse.ScrollWheelValue;
+        LoadBrowserFolder(dir);
+    }
+
+    /// <summary>Folder browser in "pick a cartridge" mode (used by the extraction dialog).</summary>
+    private void OpenRomBrowser()
+    {
+        string dir = _extractRom.Length > 0
+            ? Path.GetDirectoryName(_extractRom) ?? Directory.GetCurrentDirectory()
+            : Directory.GetCurrentDirectory();
+
+        if (!Directory.Exists(dir))
+            dir = _settings.LastFolder is { } last && Directory.Exists(last)
+                ? last
+                : Directory.GetCurrentDirectory();
+
+        _dialog = DialogKind.Folder;
+        _browserPattern = "*.rom";
+        _browserPickRom = true;
+        _browserRecursive = false;
+        _browserFocusFiles = true;
         _browserWheel = _mouse.ScrollWheelValue;
         LoadBrowserFolder(dir);
     }
@@ -102,13 +127,14 @@ public sealed partial class VisualizerGame : Game
             _browserCts = new CancellationTokenSource();
             CancellationToken token = _browserCts.Token;
             string root = _browserDir;
+            string pattern = _browserPattern;
             _browserScanning = true;
             _browserFound = 0;
             _browserScan = Task.Run(() =>
             {
                 try
                 {
-                    return Library.Scan(root, true, token, n => _browserFound = n);
+                    return Library.Scan(root, true, token, n => _browserFound = n, pattern);
                 }
                 catch (OperationCanceledException)
                 {
@@ -120,7 +146,7 @@ public sealed partial class VisualizerGame : Game
         }
 
         _browserScanning = false;
-        ScanResult result = Library.Scan(_browserDir, false, CancellationToken.None);
+        ScanResult result = Library.Scan(_browserDir, false, CancellationToken.None, pattern: _browserPattern);
         _browserFiles.Clear();
         _browserFiles.AddRange(result.Files);
         _browserError = result.Error;
@@ -159,6 +185,22 @@ public sealed partial class VisualizerGame : Game
         _dialog = DialogKind.None;
     }
 
+    /// <summary>
+    /// Leaving the cartridge picker goes back to the extraction dialog; leaving the normal folder
+    /// browser closes it.
+    /// </summary>
+    private void CancelFolderDialog()
+    {
+        bool backToExtract = _browserPickRom;
+        CloseDialog();
+
+        if (backToExtract)
+        {
+            _browserPickRom = false;
+            _dialog = DialogKind.Extract;
+        }
+    }
+
     private void BrowserGoUp()
     {
         DirectoryInfo? parent = Directory.GetParent(_browserDir);
@@ -172,6 +214,13 @@ public sealed partial class VisualizerGame : Game
             return;
 
         VgmEntry entry = _browserFiles[Math.Clamp(_browserFileSel, 0, _browserFiles.Count - 1)];
+
+        // "Pick a cartridge": hand the path back to the extraction dialog instead of playing it.
+        if (_browserPickRom)
+        {
+            PickRom(entry.Path);
+            return;
+        }
 
         _settings.Recursive = _browserRecursive;
         _settings.LastFolder = _browserDir;
@@ -257,13 +306,15 @@ public sealed partial class VisualizerGame : Game
             HandleProfileDialogInput();
         else if (_dialog == DialogKind.Folder)
             HandleFolderDialogInput();
+        else if (_dialog == DialogKind.Extract)
+            HandleExtractDialogInput();
     }
 
     private void HandleFolderDialogInput()
     {
         if (Pressed(Keys.Escape))
         {
-            CloseDialog();
+            CancelFolderDialog();
             return;
         }
 
@@ -321,7 +372,7 @@ public sealed partial class VisualizerGame : Game
 
         if (_browserCloseHit.Contains(p) || _browserCancelHit.Contains(p))
         {
-            CloseDialog();
+            CancelFolderDialog();
             return;
         }
 
@@ -488,10 +539,18 @@ public sealed partial class VisualizerGame : Game
 
         Rect(0, 0, VW, VH, new Color(0, 0, 0, 165));
 
-        if (_dialog == DialogKind.Folder)
-            DrawFolderDialog();
-        else
-            DrawProfileDialog();
+        switch (_dialog)
+        {
+            case DialogKind.Folder:
+                DrawFolderDialog();
+                break;
+            case DialogKind.Profile:
+                DrawProfileDialog();
+                break;
+            case DialogKind.Extract:
+                DrawExtractDialog();
+                break;
+        }
     }
 
     private void DrawFolderDialog()
@@ -499,7 +558,7 @@ public sealed partial class VisualizerGame : Game
         const int dx = 190, dy = 100, dw = 900, dh = 520;
         Panel(dx, dy, dw, dh);
         Rect(dx, dy, dw, 24, PanelColor);
-        Text("OPEN FOLDER", dx + 12, dy + 8, Accent);
+        Text(_browserPickRom ? "SELECT A CARTRIDGE (.ROM)" : "OPEN FOLDER", dx + 12, dy + 8, Accent);
 
         _browserCloseHit = new Rectangle(dx + dw - 24, dy + 4, 16, 16);
         DrawButton(_browserCloseHit, "X", false, Warn);
@@ -541,7 +600,8 @@ public sealed partial class VisualizerGame : Game
         _browserDirFirst = Math.Clamp(_browserDirFirst, 0, Math.Max(0, _browserRows.Count - folderRows));
 
         Text("FOLDERS", leftX + 4, listTop - 12, _browserFocusFiles ? Dim : Accent);
-        Text($"*.VGM ({_browserFiles.Count})", rightX + 4, listTop - 12, _browserFocusFiles ? Accent : Dim);
+        Text($"*{_browserPattern[1..].ToUpperInvariant()} ({_browserFiles.Count})", rightX + 4, listTop - 12,
+            _browserFocusFiles ? Accent : Dim);
 
         Rect(leftX, listTop, 1, folderH, Grid);
         Rect(rightX - 12, listTop, 1, listH, Grid);
@@ -644,7 +704,8 @@ public sealed partial class VisualizerGame : Game
         }
         else if (_browserFiles.Count == 0)
         {
-            Text(_browserError is null ? "NO .VGM FILES IN THIS FOLDER" : "ERROR: " + _browserError.ToUpperInvariant(),
+            string empty = $"NO {_browserPattern[1..].ToUpperInvariant()} FILES IN THIS FOLDER";
+            Text(_browserError is null ? empty : "ERROR: " + _browserError.ToUpperInvariant(),
                 rightX + 8, listTop, _browserError is null ? Dim : Warn);
         }
 
@@ -668,9 +729,11 @@ public sealed partial class VisualizerGame : Game
         DrawButton(_browserCancelHit, "CANCEL", false, Dim);
 
         _browserPlayHit = new Rectangle(dx + dw - 176, barY + 12, 76, 18);
-        DrawButton(_browserPlayHit, "PLAY", true, Accent);
+        DrawButton(_browserPlayHit, _browserPickRom ? "USE" : "PLAY", true, Accent);
 
-        Text("ENTER PLAYS · BACKSPACE UP · F5 RESCAN", dx + 12, barY + 34, Dim);
+        Text(_browserPickRom ? "ENTER USES THIS ROM · BACKSPACE UP · F5 RESCAN"
+                             : "ENTER PLAYS · BACKSPACE UP · F5 RESCAN",
+            dx + 12, barY + 34, Dim);
     }
 
     /// <summary>

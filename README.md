@@ -180,6 +180,8 @@ In the **piano** view:
 | <img src="docs/media/piano.png" width="100%"> | <img src="docs/media/folder-browser.png" width="100%"> |
 | **Mixing profiles** | **Help** (with the build version) |
 | <img src="docs/media/profiles.png" width="100%"> | <img src="docs/media/help.png" width="100%"> |
+| **Extract from ROM** (any cartridge, no profile) | **Cartridge picker** (`*.rom`, breadcrumb) |
+| <img src="docs/media/extract.png" width="100%"> | <img src="docs/media/rom-picker.png" width="100%"> |
 
 What you see:
 
@@ -317,20 +319,34 @@ explicit `--mapper linear | konami | konami-scc | ascii8 | ascii16` (16 KB to 1 
 # full song list, using a curated profile (sound routine + ids + names)
 MsxAudioTool extract-direct "rom.msx" game.msxaudio --profile profiles/kingsvalley2.json
 
-# whatever the game plays after boot, optionally sending keys/joystick
-MsxAudioTool capture "rom.msx" title.vgm --seconds 20 --press 8:1@2    # Space at 2 s
-MsxAudioTool capture "rom.msx" game.vgm  --seconds 20 --press 15:4@2   # joystick trigger A
+# whatever the game plays: boot it, send buttons, record
+MsxAudioTool capture "rom.msx" gameplay.vgm --seconds 30 --keys "START@1"
+MsxAudioTool capture "rom.msx" title.vgm    --seconds 20                    # nothing pressed
 
-# boot diagnostics: mapper, hooks, high-RAM writes
+# boot diagnostics: mapper, hooks, keyboard/joystick, hot addresses of the hook
 MsxAudioTool probe "rom.msx" --mapper konami-scc
 ```
 
+The same capture runs **from the player**: `F3` (or the **EXTRACT FROM ROM** chip in the header)
+opens a dialog where you pick the cartridge (its own `.rom` browser), the mapper, how long to record
+and the button script. The result is written next to the ROM as `<rom>_capture.vgm` and loaded
+straight into the player — no profile, no emulator, no CLI.
+
+| Key script | Meaning |
+| :--- | :--- |
+| `START@1` | joystick trigger A one second after boot (the usual "press start") |
+| `FIRE@1, RIGHT@3` | several presses, comma separated |
+| `TRIGGER-B@2` | the second joystick button |
+| `UP` / `DOWN` / `LEFT` / `RIGHT` | joystick directions (`@seconds` optional, default 1 s) |
+| `8:1@2` | raw matrix: keyboard **row 8, bit 1**, two seconds after boot |
+
 Status: King's Valley II works through its profile (interrupt-driven driver, ~97k writes in 100 s,
-audio renders). King's Valley 1 boots, the mapper/keyboard/joystick are modelled and its sound player
-is identified, but its game state machine waits on BIOS behaviour that the minimal machine does not
-model yet, so the title music is not started. The next step is finishing the main-loop/BIOS model (or
-providing a KV1 profile with the song-load routine). The `extract` path (openMSX) remains the
-bit-exact reference.
+audio renders). **King's Valley 1 (16 KB, PSG only) now works end to end without a profile**: it boots,
+the joystick trigger starts the game, and the capture contains its music (verified: 394 pitch writes
+in 30 s, notes visible in the piano roll). Two bugs made this possible: the boot skipped `H.STKE`, and
+the hook used to be *restarted* when a frame overran the instruction budget instead of continuing —
+KV1 sets a re-entry guard in its handler, so restarting it left the game frozen at the title.
+`extract` (openMSX) remains the bit-exact reference.
 
 ## CLI
 
@@ -339,6 +355,8 @@ MsxAudioTool import <vgm-folder> <out.msxaudio> [--title T] [--clips]
 MsxAudioTool info <package.msxaudio>
 MsxAudioTool extract <rom> <out.msxaudio> --profile profile.json [--openmsx path]
 MsxAudioTool extract-direct <rom> <out.msxaudio> --profile profile.json
+MsxAudioTool capture <rom> <out.vgm> [--seconds N] [--mapper M] [--keys "START@1,RIGHT@3"]
+MsxAudioTool probe <rom> [--mapper M]
 MsxAudioTool render <package.msxaudio> <id|all> <out.wav> [--profile original|stereo|remaster]
 MsxAudioTool verify <vgm> <capture.wav>
 MsxAudioTool unpack <package.msxaudio> <folder>

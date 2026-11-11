@@ -154,77 +154,41 @@ internal static class Program
 
     /// <summary>
     /// Boots the ROM and records whatever the sound driver plays, without a profile. Useful to grab
-    /// a title theme (or to check that a cartridge's driver works) for any ROM. <c>--press</c> can
-    /// simulate keys (<c>row:mask@seconds</c>, e.g. <c>8:1@2</c> = Space after 2 s).
+    /// a title theme (or to check that a cartridge's driver works) for any ROM. <c>--keys</c> (or
+    /// <c>--press</c>) simulates buttons: <c>START@2</c>, <c>RIGHT@4</c> or <c>row:mask@seconds</c>.
     /// </summary>
     private static int Capture(string[] args)
     {
         if (args.Length < 2)
-            return Usage("capture <rom> <out.vgm> [--seconds N] [--mapper ...] [--press row:mask@seconds,...]");
+            return Usage("capture <rom> <out.vgm> [--seconds N] [--mapper ...] [--keys START@2,...] [--verbose 1]");
 
-        byte[] rom = File.ReadAllBytes(args[0]);
-        var mapper = RomMapperNames.Parse(Value(args, "--mapper"));
         double seconds = double.TryParse(Value(args, "--seconds") ?? "10", out double parsed) ? parsed : 10;
 
-        var machine = new MiniMsx(rom, mapper);
-        bool hooked = machine.Boot();
-        var info = machine.CartridgeInfo;
-
-        Console.WriteLine($"boot {hooked}, mapper={RomMapperNames.Name(info.Mapper)}{(info.Scc ? " +SCC" : "")}, " +
-                          $"KEYI={machine.KeyHook:X4}, TIMI={machine.TimerHook:X4}");
-
-        var presses = new List<(int Frame, int Row, int Mask)>();
-        foreach (string part in (Value(args, "--press") ?? string.Empty)
-                     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        var options = new RomCaptureOptions
         {
-            string[] at = part.Split('@');
-            string[] rowMask = at[0].Split(':');
-            if (rowMask.Length != 2 ||
-                !int.TryParse(rowMask[0], out int row) ||
-                !int.TryParse(rowMask[1], out int mask))
-                continue;
+            RomPath = args[0],
+            Mapper = RomMapperNames.Parse(Value(args, "--mapper")),
+            Seconds = seconds,
+            FrameBudget = int.TryParse(Value(args, "--budget") ?? "", out int budget) ? budget : 200_000,
+        };
 
-            double time = 1.0;
-            if (at.Length > 1)
-                double.TryParse(at[1], NumberStyles.Float, CultureInfo.InvariantCulture, out time);
+        options.Keys.AddRange(KeyPress.ParseScript(Value(args, "--keys") ?? Value(args, "--press")));
 
-            presses.Add(((int)Math.Round(time * 60), row, mask));
-            Console.WriteLine($"press {row}:{mask} at {time:0.0}s");
-        }
+        bool verbose = (Value(args, "--verbose") ?? Value(args, "--trace") ?? "")
+            .Equals("1", StringComparison.OrdinalIgnoreCase);
 
-        machine.ResetCapture();
+        var result = RomCapture.Run(options, verbose ? Console.WriteLine : null);
 
-        bool trace = (Value(args, "--trace") ?? "").Equals("1", StringComparison.OrdinalIgnoreCase);
-        int frames = Math.Max(1, (int)Math.Round(seconds * 60));
-        int budget = int.TryParse(Value(args, "--budget") ?? "", out int parsedBudget) ? parsedBudget : 200_000;
+        File.WriteAllBytes(args[1], VgmWriter.Write(result.Vgm));
+        Console.WriteLine($"mapper={RomMapperNames.Name(result.Mapper)}{(result.Scc ? " +SCC" : "")}, " +
+                          $"hook={(result.Hook == 0 ? "none" : $"{result.Hook:X4}")}");
+        Console.WriteLine($"{result.Vgm.Events.Count} writes ({result.NoteWrites} pitch), " +
+                          $"{result.Vgm.TotalSeconds:0.0}s -> {args[1]}" +
+                          (result.Loop is { } loop ? $"; loop {loop.Start:0.000}s + {loop.Duration:0.000}s" : "; no loop detected"));
 
-        for (int frame = 0; frame < frames; frame++)
-        {
-            foreach (var press in presses)
-            {
-                if (frame == press.Frame) machine.PressKey(press.Row, press.Mask, true);
-                else if (frame == press.Frame + 12) machine.PressKey(press.Row, press.Mask, false);
-            }
+        if (result.NoteWrites < 20)
+            Console.WriteLine("warning: no music captured (mixer writes only); try --seconds longer or --keys START@1");
 
-            machine.Frame(budget);
-
-            if (trace && frame % 60 == 0)
-            {
-                Console.WriteLine($"  t={frame / 60,3}s E000={machine.Memory(0xE000):X2} " +
-                                  $"E002={machine.Memory(0xE002):X2} E003={machine.Memory(0xE003):X2} " +
-                                  $"E005={machine.Memory(0xE005):X2} E008={machine.Memory(0xE008):X2} " +
-                                  $"E009={machine.Memory(0xE009):X2} events={machine.EventCount}" +
-                                  $" hookPC={machine.HookPc:X4}" +
-                                  (machine.HookBudgetExhausted ? " EXHAUSTED" : ""));
-            }
-        }
-
-        var vgm = machine.BuildVgm("capture", frames * 735);
-        File.WriteAllBytes(args[1], VgmWriter.Write(vgm));
-
-        var loop = VgmLoopFinder.Find(vgm);
-        Console.WriteLine($"{vgm.Events.Count} writes, {vgm.TotalSeconds:0.0}s -> {args[1]}" +
-                          (loop is { } found ? $"; loop {found.Start:0.000}s + {found.Duration:0.000}s" : "; no loop detected"));
         return 0;
     }
 

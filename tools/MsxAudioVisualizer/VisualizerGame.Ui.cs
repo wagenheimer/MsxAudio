@@ -42,11 +42,15 @@ public sealed partial class VisualizerGame : Game
 
         var p = _player;
 
-        // Profile chip on the right (opens the profile dialog).
+        // Profile chip on the right (opens the profile dialog); "extract" sits just left of it.
         string profileLabel = "PROFILE: " + (p?.Profile.Name ?? _profile.Name).ToUpperInvariant();
         int labelWidth = PixelFont.Measure(profileLabel) + 14;
         int chipX = VW - 16 - labelWidth;
         _profileButtonHit = new Rectangle(chipX, 28, labelWidth, 15);
+
+        const string extractLabel = "EXTRACT FROM ROM";
+        int extractWidth = PixelFont.Measure(extractLabel) + 14;
+        _extractButtonHit = new Rectangle(chipX - 8 - extractWidth, 28, extractWidth, 15);
 
         if (p is not null)
         {
@@ -73,6 +77,7 @@ public sealed partial class VisualizerGame : Game
         }
 
         DrawButton(_profileButtonHit, profileLabel, true, Accent);
+        DrawButton(_extractButtonHit, extractLabel, false, Accent);
     }
 
     private static string FormatTime(double seconds)
@@ -404,6 +409,7 @@ public sealed partial class VisualizerGame : Game
         {
             "TAB / HEADER   SPECTRUM / PIANO ROLL / PIANO",
             "F2 / CTRL+O    OPEN FOLDER (RECURSIVE OPTION)",
+            "F3             EXTRACT MUSIC FROM A CARTRIDGE",
             "F5             RESCAN THE CURRENT FOLDER",
             "UP / DOWN      SELECT AND PLAY A TRACK",
             "PAGE UP/DOWN   SCROLL THE TRACK LIST",

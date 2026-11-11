@@ -40,6 +40,9 @@ public sealed partial class VisualizerGame : Game
         if (Pressed(Keys.F2) || (ctrl && Pressed(Keys.O)))
             OpenFolderDialog();
 
+        if (Pressed(Keys.F3))
+            OpenExtractDialog();
+
         if (Pressed(Keys.H))
             _showHelp = !_showHelp;
 
@@ -201,6 +204,12 @@ public sealed partial class VisualizerGame : Game
             if (_profileButtonHit.Contains(p))
             {
                 OpenProfileDialog();
+                return;
+            }
+
+            if (_extractButtonHit.Contains(p))
+            {
+                OpenExtractDialog();
                 return;
             }
 
