@@ -35,16 +35,21 @@ public static class VgmImporter
     }
 
     /// <summary>Imports a single VGM.</summary>
+    /// <param name="idOverride">Explicit id (defaults to the file name).</param>
+    /// <param name="nameOverride">Explicit display name (defaults to <paramref name="names"/> or the id).</param>
     public static MsxAudioSong ImportFile(
         MsxAudioLibrary library,
         string file,
         bool music,
         IReadOnlyDictionary<string, string>? names = null,
-        Action<string>? log = null)
+        Action<string>? log = null,
+        string? idOverride = null,
+        string? nameOverride = null)
     {
         var vgm = VgmFile.Load(file);
-        string id = Path.GetFileNameWithoutExtension(file);
-        string name = names != null && names.TryGetValue(id, out var friendly) ? friendly : id;
+        string id = idOverride ?? Path.GetFileNameWithoutExtension(file);
+        string name = nameOverride
+            ?? (names != null && names.TryGetValue(id, out var friendly) ? friendly : id);
 
         if (music)
         {

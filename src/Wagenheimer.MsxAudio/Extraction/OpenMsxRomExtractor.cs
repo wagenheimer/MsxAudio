@@ -87,12 +87,13 @@ public static class OpenMsxRomExtractor
             }
 
             files[id] = file;
-            string idName = $"id_{id:00}";
-            if (profile.Names.TryGetValue(id, out var friendly)) names[idName] = friendly;
+            string fallback = $"id_{id:00}";
+            string songId = profile.Names.TryGetValue(id, out var friendly) ? friendly : fallback;
 
-            var song = VgmImporter.ImportFile(library, file, profile.MusicIds.Contains(id), names, log);
+            var song = VgmImporter.ImportFile(
+                library, file, profile.MusicIds.Contains(id), names, log,
+                idOverride: songId, nameOverride: songId);
             song.OriginalId = id;
-            if (!profile.Names.TryGetValue(id, out _)) song.Id = $"id_{id:00}";
         }
 
         return new ExtractionResult { Library = library, VgmFiles = files };
