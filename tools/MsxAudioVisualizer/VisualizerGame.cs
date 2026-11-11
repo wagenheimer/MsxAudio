@@ -125,6 +125,7 @@ public sealed class VisualizerGame : Game
     private int _pianoChannel;
     private int _pianoBaseMidi = 48;      // C3 at the left edge; 3 octaves visible
     private float _auditionTimer;         // time left to feed the audition while paused
+    private int _heldKeyMidi = -1;        // piano key held with the mouse (note-on until release)
     private bool _demoRunning;
     private int _demoChannel = -1;
     private float _demoTimer;
@@ -266,6 +267,30 @@ public sealed class VisualizerGame : Game
             .OrderBy(p => p, StringComparer.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Freezes a mute/solo state at startup, for docs and screenshots:
+    /// <c>MSXAUDIO_MUTE=0,3</c> and <c>MSXAUDIO_SOLO=4</c> (channel indexes 0..7).
+    /// </summary>
+    private void ApplyStartupMix(VgmPlayer player)
+    {
+        var mute = Environment.GetEnvironmentVariable("MSXAUDIO_MUTE");
+        if (!string.IsNullOrWhiteSpace(mute))
+        {
+            foreach (var part in mute.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                if (int.TryParse(part, out int ch) && ch is >= 0 and < 8)
+                    player.ChannelMuted[ch] = true;
+        }
+
+        var solo = Environment.GetEnvironmentVariable("MSXAUDIO_SOLO");
+        if (!string.IsNullOrWhiteSpace(solo) &&
+            int.TryParse(solo.Trim(), out int soloChannel) &&
+            soloChannel is >= 0 and < 8)
+        {
+            player.SoloChannel = soloChannel;
+            _pianoChannel = soloChannel;
+        }
+    }
+
     private void LoadTrack(int index)
     {
         if (index < 0 || index >= _tracks.Count)
@@ -284,6 +309,9 @@ public sealed class VisualizerGame : Game
             _sound?.Dispose();
 
             _player = new VgmPlayer(vgm, loop: true, sampleRate: 48000, oversample: _profile.Oversample, profile: _profile);
+            ApplyStartupMix(_player);
+            _heldKeyMidi = -1;
+            _auditionTimer = 0f;
 
             if (!_recording)
             {
@@ -560,6 +588,15 @@ public sealed class VisualizerGame : Game
         bool pressed = down && _prevMouse.LeftButton == ButtonState.Released;
         var p = MouseDesign();
 
+        // Piano note held with the mouse: it follows the pointer and stops on release, like a key.
+        if (_heldKeyMidi >= 0)
+        {
+            if (!down)
+                StopPianoHold();
+            else if (_view == PanelView.Piano && _player is not null)
+                DragPianoHold(p);
+        }
+
         // Playlist: click a track to select and play it (works even before a song is loaded).
         if (pressed)
         {
@@ -630,21 +667,11 @@ public sealed class VisualizerGame : Game
             }
 
             // Black keys overlap the white ones, so they are tested first.
-            for (int pass = 0; pass < 2; pass++)
+            int key = KeyAt(p);
+            if (key >= 0)
             {
-                bool black = pass == 0;
-                for (int midi = 0; midi < 128; midi++)
-                {
-                    var rect = _pianoKeyRect[midi];
-                    if (rect.IsEmpty || Notes[midi % 12].Contains('#') != black)
-                        continue;
-
-                    if (!rect.Contains(p))
-                        continue;
-
-                    PlayPiano(midi);
-                    return;
-                }
+                StartPianoHold(key);
+                return;
             }
         }
 
@@ -653,9 +680,7 @@ public sealed class VisualizerGame : Game
         {
             if (_soloHit[ch].Contains(p))
             {
-                _player.SoloChannel = _player.SoloChannel == ch ? null : ch;
-                _status = _player.SoloChannel is int s ? $"SOLO {ChannelName(s)}" : "SOLO OFF";
-                _statusTimer = 2f;
+                ToggleSolo(ch);
                 return;
             }
 
@@ -669,22 +694,127 @@ public sealed class VisualizerGame : Game
 
             if (_stripHit[ch].Contains(p))
             {
-                _player.SoloChannel = _player.SoloChannel == ch ? null : ch;
-                _status = _player.SoloChannel is int s ? $"SOLO {ChannelName(s)}" : "SOLO OFF";
-                _statusTimer = 2f;
+                ToggleSolo(ch);
                 return;
             }
         }
     }
 
+    /// <summary>Solo on/off; when soloing, the piano follows the channel that is being heard.</summary>
+    private void ToggleSolo(int channel)
+    {
+        if (_player is null)
+            return;
+
+        _player.SoloChannel = _player.SoloChannel == channel ? null : channel;
+
+        if (_player.SoloChannel is int solo)
+            _pianoChannel = solo;
+
+        _status = _player.SoloChannel is int s ? $"SOLO {ChannelName(s)}" : "SOLO OFF";
+        _statusTimer = 2f;
+    }
+
     private static string ChannelName(int ch) => ch < 3 ? $"PSG{ch + 1}" : $"SCC{ch - 2}";
 
-    /// <summary>Plays a note with the currently selected channel.</summary>
-    private void PlayPiano(int midi) => PlayPianoFor(_pianoChannel, midi);
+    /// <summary>
+    /// Whether a channel is actually audible right now: not muted, its chip is on and it passes the
+    /// solo filter. The piano, the roll and the channel strips all use this so the screen matches
+    /// what is heard.
+    /// </summary>
+    private bool IsAudible(int channel)
+    {
+        if (_player is null)
+            return false;
+
+        if (_player.ChannelMuted[channel])
+            return false;
+
+        bool chipOn = channel < 3 ? _player.PsgEnabled : _player.SccEnabled;
+        if (!chipOn)
+            return false;
+
+        return _player.SoloChannel is not int solo || solo == channel;
+    }
+
+    /// <summary>MIDI note under a design-space point, or -1 (black keys are tested first).</summary>
+    private int KeyAt(Point p)
+    {
+        for (int pass = 0; pass < 2; pass++)
+        {
+            bool black = pass == 0;
+            for (int midi = 0; midi < 128; midi++)
+            {
+                var rect = _pianoKeyRect[midi];
+                if (rect.IsEmpty || Notes[midi % 12].Contains('#') != black)
+                    continue;
+
+                if (rect.Contains(p))
+                    return midi;
+            }
+        }
+
+        return -1;
+    }
 
     /// <summary>
-    /// Auditions <paramref name="midi"/> with <paramref name="channel"/>'s instrument. Works while the
-    /// song is paused too: the audition is rendered alone and fed to the sound card.
+    /// Note-on: the note keeps sounding while the mouse button is held (drag retunes it), so the
+    /// duration is exactly the duration of the click.
+    /// </summary>
+    private void StartPianoHold(int midi)
+    {
+        if (_player is null)
+            return;
+
+        if (_demoRunning)
+        {
+            _demoRunning = false;
+            _demoChannel = -1;
+        }
+
+        _heldKeyMidi = midi;
+        _player.AuditionHold(_pianoChannel, midi);
+        _auditionTimer = 600f;   // keep the paused feeder alive while the key is held
+
+        _status = $"{ChannelName(_pianoChannel)} {NoteName(FrequencyOf(midi))}";
+        _statusTimer = 2f;
+
+        if (_paused && _sound is not null)
+        {
+            // The song is paused: drop its queued buffers so the note is heard immediately.
+            _sound.Stop();
+            _sound.Play();
+        }
+    }
+
+    /// <summary>While dragging with the button down, move the sounding note to the key under the cursor.</summary>
+    private void DragPianoHold(Point p)
+    {
+        int midi = KeyAt(p);
+        if (midi < 0 || midi == _heldKeyMidi || _player is null)
+            return;
+
+        _heldKeyMidi = midi;
+        _player.AuditionHold(_pianoChannel, midi);
+
+        _status = $"{ChannelName(_pianoChannel)} {NoteName(FrequencyOf(midi))}";
+        _statusTimer = 2f;
+    }
+
+    /// <summary>Note-off on mouse release (the player applies a short fade to avoid a click).</summary>
+    private void StopPianoHold()
+    {
+        if (_heldKeyMidi < 0)
+            return;
+
+        _heldKeyMidi = -1;
+        _player?.StopAudition();
+        _auditionTimer = 0.1f;   // feed the release tail while paused
+    }
+
+    /// <summary>
+    /// Plays a fixed-length note with <paramref name="channel"/>'s instrument (used by the "play all"
+    /// demo). Works while the song is paused too: the audition is rendered alone.
     /// </summary>
     private void PlayPianoFor(int channel, int midi)
     {
@@ -724,6 +854,19 @@ public sealed class VisualizerGame : Game
             return;
         }
 
+        bool any = false;
+        for (int ch = 0; ch < 8; ch++)
+            any |= IsAudible(ch);
+
+        if (!any)
+        {
+            _status = "ALL CHANNELS MUTED";
+            _statusTimer = 2f;
+            return;
+        }
+
+        StopPianoHold();
+
         _demoRunning = true;
         _demoChannel = -1;
         _demoTimer = 0f;
@@ -731,7 +874,10 @@ public sealed class VisualizerGame : Game
         _statusTimer = 2f;
     }
 
-    /// <summary>Walks the 8 channels, playing each instrument at the note the song is using.</summary>
+    /// <summary>
+    /// Walks the audible channels, playing each instrument at the note the song is using. Muted or
+    /// soloed-out channels are skipped, so the demo matches the mix that is being heard.
+    /// </summary>
     private void UpdateInstrumentDemo(float dt)
     {
         if (!_demoRunning || _player is null)
@@ -741,7 +887,12 @@ public sealed class VisualizerGame : Game
         if (_demoTimer > 0)
             return;
 
-        _demoChannel++;
+        do
+        {
+            _demoChannel++;
+        }
+        while (_demoChannel < 8 && !IsAudible(_demoChannel));
+
         if (_demoChannel >= 8)
         {
             _demoRunning = false;
@@ -775,9 +926,25 @@ public sealed class VisualizerGame : Game
         double time = _player.Time;
 
         var vgm = _player.Song;
+        var muted = (bool[])_player.ChannelMuted.Clone();
+        int? solo = _player.SoloChannel;
+        bool psgOn = _player.PsgEnabled;
+        bool sccOn = _player.SccEnabled;
+
         _player.Dispose();
         _player = new VgmPlayer(vgm, loop: true, sampleRate: 48000, oversample: next.Oversample, profile: next);
         _player.Seek(time);
+
+        // Keep what the user was listening to: mute, solo and chip toggles survive a profile change.
+        for (int i = 0; i < 8; i++)
+            _player.ChannelMuted[i] = muted[i];
+
+        _player.SoloChannel = solo;
+        _player.PsgEnabled = psgOn;
+        _player.SccEnabled = sccOn;
+
+        _heldKeyMidi = -1;
+        _auditionTimer = 0f;
         ClearNotes();
         FlushAudio();
 
@@ -1154,11 +1321,10 @@ public sealed class VisualizerGame : Game
             return;
 
         double now = _player.Time;
-        int? solo = _player.SoloChannel;
 
         for (int ch = 0; ch < 8; ch++)
         {
-            bool audible = !_player.ChannelMuted[ch] && (solo is null || solo == ch);
+            bool audible = IsAudible(ch);
             var color = audible ? ChannelColors[ch] : Dim;
             var list = _notes[ch];
 
@@ -1205,7 +1371,7 @@ public sealed class VisualizerGame : Game
         Panel(x, y, w, h);
 
         Text("PIANO", x + 10, y + 6, Accent);
-        Text("CLICK A KEY TO HEAR THE INSTRUMENT", x + 74, y + 7, Dim);
+        Text("CLICK AND HOLD A KEY TO PLAY - DRAG TO SLIDE", x + 74, y + 7, Dim);
 
         string next = NextViewLabel();
         DrawViewToggle(x + w - PixelFont.Measure(next) - 22, y + 2, next);
@@ -1216,7 +1382,13 @@ public sealed class VisualizerGame : Game
         {
             var rect = new Rectangle(x + 10 + ch * 46, rowY, 42, 16);
             _pianoChannelHit[ch] = rect;
-            DrawButton(rect, ChannelName(ch), _pianoChannel == ch, ChannelColors[ch]);
+
+            // Audible channels keep their colour; muted / soloed-out ones fade, like the strips.
+            var color = IsAudible(ch)
+                ? ChannelColors[ch]
+                : Color.Lerp(ChannelColors[ch], PanelColor, 0.7f);
+
+            DrawButton(rect, ChannelName(ch), _pianoChannel == ch, color);
         }
 
         _pianoAllHit = new Rectangle(x + 10 + 8 * 46 + 8, rowY, 80, 16);
@@ -1235,11 +1407,15 @@ public sealed class VisualizerGame : Game
 
         Array.Clear(_pianoKeyRect);
 
-        // Which notes the song is playing right now (bit per channel on the MIDI note).
+        // Which notes the song is playing right now (bit per channel on the MIDI note). Muted/soloed
+        // out channels are skipped, so the keyboard only lights what is actually audible.
         Array.Clear(_keyLit);
         var player = _player!;
         for (int ch = 0; ch < 8; ch++)
         {
+            if (!IsAudible(ch))
+                continue;
+
             var info = player.Channels[ch];
             if (!info.Key || info.Frequency < 20)
                 continue;
@@ -1327,9 +1503,17 @@ public sealed class VisualizerGame : Game
         var target = player.Channels[_pianoChannel];
         int targetNote = target.Key && target.Frequency >= 20 ? MidiOf(target.Frequency) : -1;
         string playing = targetNote >= 0 ? NoteName(target.Frequency) : "---";
+        bool audibleTarget = IsAudible(_pianoChannel);
+
+        string state = audibleTarget ? "" : "  MUTED / SOLOED OUT";
+        if (targetNote >= 0 && targetNote < _pianoBaseMidi)
+            state += "  NOTE BELOW - USE '<'";
+        else if (targetNote > _pianoBaseMidi + 35)
+            state += "  NOTE ABOVE - USE '>'";
+
         Text($"{ChannelName(_pianoChannel)}  {playing}  VOL {target.Volume * 100:0}%  " +
-             $"OCT {_pianoBaseMidi / 12 - 1}  ({(_pianoChannel < 3 ? "PSG" : "SCC")} INSTRUMENT)",
-            x + 12, ky + kh + 6, Dim);
+             $"OCT {_pianoBaseMidi / 12 - 1}  ({(_pianoChannel < 3 ? "PSG" : "SCC")} INSTRUMENT){state}",
+            x + 12, ky + kh + 6, !audibleTarget ? Warn : state.Length > 0 ? Accent : Dim);
     }
 
     /// <summary>Index (0-based) of the white key that starts before <paramref name="midi"/>.</summary>
@@ -1419,10 +1603,9 @@ public sealed class VisualizerGame : Game
         {
             var info = _player!.Channels[ch];
             bool isPsg = ch < 3;
-            bool chipOn = isPsg ? _player.PsgEnabled : _player.SccEnabled;
             bool muted = _player.ChannelMuted[ch];
             bool soloed = _player.SoloChannel == ch;
-            bool audible = !muted && chipOn && (_player.SoloChannel is null || soloed);
+            bool audible = IsAudible(ch);
 
             var color = isPsg ? PsgColor : SccColor;
             if (!audible) color = Dim;
@@ -1526,11 +1709,16 @@ public sealed class VisualizerGame : Game
             _ => PanelView.Spectrum,
         };
 
-        if (_view != PanelView.Piano && _demoRunning)
+        if (_view != PanelView.Piano)
         {
-            _demoRunning = false;
-            _demoChannel = -1;
-            _player?.StopAudition();
+            StopPianoHold();
+
+            if (_demoRunning)
+            {
+                _demoRunning = false;
+                _demoChannel = -1;
+                _player?.StopAudition();
+            }
         }
 
         _status = ViewName(_view);
@@ -1605,7 +1793,7 @@ public sealed class VisualizerGame : Game
 
     private void DrawHelp()
     {
-        const int w = 660, h = 330;
+        const int w = 660, h = 356;
         int x = (VW - w) / 2, y = (VH - h) / 2;
         Panel(x, y, w, h, PanelHi);
         Rect(x, y, w, 24, PanelColor);
@@ -1629,9 +1817,10 @@ public sealed class VisualizerGame : Game
             "H              THIS HELP",
             "ESC            QUIT",
             "",
-            "PIANO: CLICK A KEY TO HEAR THE SELECTED CHANNEL'S",
-            "INSTRUMENT (WORKS WHILE PAUSED). 'PLAY ALL' WALKS",
-            "THE 8 CHANNELS; '<' / '>' CHANGE THE OCTAVE.",
+            "PIANO: CLICK AND HOLD A KEY TO PLAY THE SELECTED",
+            "CHANNEL'S INSTRUMENT (WORKS WHILE PAUSED); RELEASE",
+            "TO STOP. DRAG ACROSS THE KEYS TO SLIDE. 'PLAY ALL'",
+            "WALKS THE AUDIBLE CHANNELS; '<' / '>' CHANGE OCTAVE.",
             "",
             "DRAG A .VGM FILE INTO THE WINDOW TO PLAY IT",
             "MSXAUDIOVISUALIZER SONG.VGM --RECORD OUT.GIF --SECONDS 10",

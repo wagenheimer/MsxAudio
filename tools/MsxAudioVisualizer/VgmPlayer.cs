@@ -162,32 +162,48 @@ public sealed class VgmPlayer : IDisposable
     public AudioProfile Profile => _profile;
 
     /// <summary>Channel currently auditioning (0..7), or -1 when idle.</summary>
-    public int AuditionChannel => _tryRemaining > 0 ? _tryChannel : -1;
+    public int AuditionChannel => HasAudition ? _tryChannel : -1;
 
     /// <summary>MIDI note currently auditioning, or -1 when idle.</summary>
-    public int AuditionNote => _tryRemaining > 0 ? _auditionNote : -1;
+    public int AuditionNote => HasAudition ? _auditionNote : -1;
 
     private int _auditionNote = -1;
 
-    /// <summary>True while an audition note is still sounding.</summary>
-    public bool HasAudition => _tryRemaining > 0;
+    /// <summary>True while an audition note is sounding (including its short release tail).</summary>
+    public bool HasAudition => _tryRemaining > 0 || _tryRelease > 0;
+
+    // Release ramp: a held note ends with a few milliseconds of fade instead of a click.
+    private int _tryRelease;
+    private int _tryReleaseTotal;
 
     /// <summary>
-    /// Plays a note on a channel using the instrument the song is using right now (PSG envelope and
-    /// noise, SCC wave RAM), without disturbing the song. The note is mixed into the normal output.
+    /// Plays a fixed-length note on a channel using the instrument the song is using right now (PSG
+    /// envelope and noise, SCC wave RAM), without disturbing the song.
     /// </summary>
     /// <param name="channel">0..2 = PSG1..3, 3..7 = SCC1..5.</param>
     /// <param name="midi">MIDI note (60 = C4).</param>
     /// <param name="seconds">Note length in seconds.</param>
     public void Audition(int channel, int midi, double seconds = 0.9)
     {
+        int frames = (int)Math.Round(Math.Max(0.05, seconds) * SampleRate * _oversample);
+        StartAudition(channel, midi, Math.Max(1, frames));
+    }
+
+    /// <summary>
+    /// Note-on that keeps sounding until <see cref="StopAudition"/> (used by the piano keys, so the
+    /// note lasts as long as the key is held). Changing the pitch while held retunes the same voice.
+    /// </summary>
+    public void AuditionHold(int channel, int midi) => StartAudition(channel, midi, int.MaxValue);
+
+    private void StartAudition(int channel, int midi, int frames)
+    {
         if (channel < 0 || channel >= ChannelCount || midi < 0 || midi > 127)
             return;
 
         _tryChannel = channel;
-        _tryRemaining = Math.Max(
-            1,
-            (int)Math.Round(Math.Max(0.05, seconds) * SampleRate * _oversample));
+        _tryRemaining = frames;
+        _tryRelease = 0;
+        _tryReleaseTotal = 0;
         _auditionNote = midi;
 
         double frequency = 440.0 * Math.Pow(2, (midi - 69) / 12.0);
@@ -201,16 +217,36 @@ public sealed class VgmPlayer : IDisposable
         AuditionScc(channel - 3, frequency);
     }
 
-    /// <summary>Stops any audition note immediately (key off + silence).</summary>
+    /// <summary>Note-off: starts the short release ramp (the note stops after it).</summary>
     public void StopAudition()
     {
+        if (_tryRemaining > 0)
+            BeginRelease();
+
         _tryRemaining = 0;
         _auditionNote = -1;
+    }
 
-        for (int ch = 0; ch < 3; ch++)
-            _psgTry.Write(8 + ch, 0);
+    private void BeginRelease()
+    {
+        if (_tryChannel < 0)
+            return;
 
-        _sccTry.Write(3, 0, 0);
+        _tryReleaseTotal = Math.Max(1, (int)Math.Round(0.015 * SampleRate * _oversample));
+        _tryRelease = _tryReleaseTotal;
+    }
+
+    private void KeyOffTry()
+    {
+        if (_tryChannel < 3)
+        {
+            for (int ch = 0; ch < 3; ch++)
+                _psgTry.Write(8 + ch, 0);
+        }
+        else
+        {
+            _sccTry.Write(3, 0, 0);
+        }
     }
 
     private void AuditionPsg(int channel, double frequency)
@@ -378,7 +414,7 @@ public sealed class VgmPlayer : IDisposable
 
         // 3) Audition: a separate chip pair plays the notes triggered from the piano, mixed over the
         // song without touching its register state.
-        if (_tryRemaining > 0)
+        if (_tryRemaining > 0 || _tryRelease > 0)
             MixAudition(inCount);
 
         // 4) Decimate to the output rate, fill the scopes.
@@ -453,7 +489,7 @@ public sealed class VgmPlayer : IDisposable
         Array.Clear(_mixL, 0, inCount);
         Array.Clear(_mixR, 0, inCount);
 
-        if (_tryRemaining > 0)
+        if (_tryRemaining > 0 || _tryRelease > 0)
             MixAudition(inCount);
 
         _decimator.Process(_mixL, _mixR, inCount, _decL, _decR, frames);
@@ -467,12 +503,20 @@ public sealed class VgmPlayer : IDisposable
 
     private void MixAudition(int inCount)
     {
-        int count = Math.Min(inCount, _tryRemaining);
+        // While the note is held, render the whole chunk; while releasing, only the ramp is left.
+        int count = _tryRemaining > 0
+            ? Math.Min(inCount, _tryRemaining)
+            : Math.Min(inCount, _tryRelease);
+
         if (count <= 0)
         {
-            StopAudition();
+            KeyOffTry();
             return;
         }
+
+        bool releasing = _tryRelease > 0;
+        int releaseLeft = _tryRelease;
+        float releaseTotal = Math.Max(1, _tryReleaseTotal);
 
         const float auditionBoost = 1.35f;
 
@@ -486,7 +530,14 @@ public sealed class VgmPlayer : IDisposable
 
             for (int i = 0; i < count; i++)
             {
-                float v = buf[i] * gain;
+                float env = 1f;
+                if (releasing)
+                {
+                    env = releaseLeft / releaseTotal;
+                    if (releaseLeft > 0) releaseLeft--;
+                }
+
+                float v = buf[i] * gain * env;
                 _mixL[i] += v * pl;
                 _mixR[i] += v * pr;
             }
@@ -501,15 +552,36 @@ public sealed class VgmPlayer : IDisposable
 
             for (int i = 0; i < count; i++)
             {
-                float v = buf[i] * gain;
+                float env = 1f;
+                if (releasing)
+                {
+                    env = releaseLeft / releaseTotal;
+                    if (releaseLeft > 0) releaseLeft--;
+                }
+
+                float v = buf[i] * gain * env;
                 _mixL[i] += v * pl;
                 _mixR[i] += v * pr;
             }
         }
 
-        _tryRemaining -= inCount;
-        if (_tryRemaining <= 0)
-            StopAudition();
+        if (releasing)
+            _tryRelease = releaseLeft;
+
+        if (_tryRemaining > 0)
+        {
+            _tryRemaining -= inCount;
+            if (_tryRemaining <= 0)
+            {
+                // The fixed-length note (demo) ended: fade it out instead of cutting it.
+                _tryRemaining = 0;
+                _auditionNote = -1;
+                BeginRelease();
+            }
+        }
+
+        if (_tryRemaining <= 0 && _tryRelease <= 0)
+            KeyOffTry();
     }
 
     private void JumpToLoop()

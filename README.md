@@ -128,9 +128,9 @@ In the **piano** view:
 
 | Action | Result |
 | :--- | :--- |
-| click a key | plays that note with the **selected channel's instrument** (works while paused) |
+| click **and hold** a key | plays that note with the **selected channel's instrument** for as long as you hold it (works while paused); drag across the keys to slide |
 | `PSG1…SCC5` | selects which channel's instrument the keys use |
-| `PLAY ALL` | walks the 8 channels, playing each instrument at the note the song is using |
+| `PLAY ALL` | walks the **audible** channels, playing each instrument at the note the song is using |
 | `<` / `>` | shifts the keyboard one octave (3 octaves on screen) |
 
 What you see:
@@ -143,7 +143,9 @@ What you see:
   muted/soloed channels draw dimmed;
 - **PIANO** with three octaves: the bars under each key show which **notes the song is playing** right
   now (one colour per channel), and clicking a key auditions that instrument — the same PSG envelope/
-  noise and SCC wave the song uses, mixed over the music;
+  noise and SCC wave the song uses, mixed over the music. The note lasts as long as the mouse button
+  is held. **Mute/solo also apply here**: a muted channel (or one filtered out by solo) stops lighting
+  its keys and fades its selector, so the keyboard shows exactly what is being heard;
 - the **MASTER** oscilloscope and the per-channel scopes draw a **min/max envelope** per pixel column,
   so peaks stay visible instead of being averaged away;
 - one strip per channel (PSG blue, SCC green) with live oscilloscope, volume, level with **peak
