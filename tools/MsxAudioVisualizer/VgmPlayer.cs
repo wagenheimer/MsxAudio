@@ -151,6 +151,16 @@ public sealed class VgmPlayer : IDisposable
     /// <summary>When set, only this channel is audible (0..7); <c>null</c> = all.</summary>
     public int? SoloChannel { get; set; }
 
+    /// <summary>Master volume applied to the final output (0..1).</summary>
+    public float Volume { get; set; } = 1f;
+
+    /// <summary>When false the song stops at the end instead of jumping to the loop point.</summary>
+    public bool LoopEnabled { get; set; } = true;
+
+    /// <summary>Optional A-B loop: jumps back to <see cref="LoopA"/> after passing <see cref="LoopB"/>.</summary>
+    public double? LoopA { get; set; }
+    public double? LoopB { get; set; }
+
     /// <summary>Copies the 32-sample SCC wave RAM of a channel (normalised -1..1).</summary>
     public void CopySccWave(int sccChannel, Span<float> destination)
     {
@@ -422,8 +432,9 @@ public sealed class VgmPlayer : IDisposable
 
         for (int i = 0; i < frames; i++)
         {
-            destination[i * 2] = Math.Clamp(_decL[i], -1f, 1f);
-            destination[i * 2 + 1] = Math.Clamp(_decR[i], -1f, 1f);
+            float volume = Math.Clamp(Volume, 0f, 1f);
+            destination[i * 2] = Math.Clamp(_decL[i] * volume, -1f, 1f);
+            destination[i * 2 + 1] = Math.Clamp(_decR[i] * volume, -1f, 1f);
 
             float mono = (destination[i * 2] + destination[i * 2 + 1]) * 0.5f;
             _scopeRing[_scopePos] = mono;
@@ -462,10 +473,17 @@ public sealed class VgmPlayer : IDisposable
         _internalPos += inCount;
         _samplePos += (long)Math.Round(frames * 44100.0 / SampleRate);
 
-        // 6) Loop / end.
+        // 6) A-B loop, then loop / end.
+        if (LoopA is double a && LoopB is double b && b > a &&
+            _samplePos >= (long)Math.Round(b * 44100.0))
+        {
+            Seek(a);
+            return;
+        }
+
         if (_samplePos >= _vgm.TotalSamples)
         {
-            if (_loop)
+            if (_loop && LoopEnabled)
                 JumpToLoop();
             else
                 _finished = true;
@@ -496,8 +514,9 @@ public sealed class VgmPlayer : IDisposable
 
         for (int i = 0; i < frames; i++)
         {
-            destination[i * 2] = Math.Clamp(_decL[i], -1f, 1f);
-            destination[i * 2 + 1] = Math.Clamp(_decR[i], -1f, 1f);
+            float volume = Math.Clamp(Volume, 0f, 1f);
+            destination[i * 2] = Math.Clamp(_decL[i] * volume, -1f, 1f);
+            destination[i * 2 + 1] = Math.Clamp(_decR[i] * volume, -1f, 1f);
         }
     }
 

@@ -96,6 +96,21 @@ public sealed partial class VisualizerGame : Game
         int mx = barX + filled;
         Rect(mx - 1, barY - 4, 3, barH + 8, Accent);
 
+        // A-B loop markers.
+        if (_player.LoopA is double a)
+        {
+            int ax = barX + (int)(barW * Math.Clamp(a / total, 0, 1));
+            Rect(ax - 1, barY - 8, 2, 6, PsgColor);
+            Text("A", ax - 2, barY + barH + 2, PsgColor);
+        }
+
+        if (_player.LoopB is double b)
+        {
+            int bx = barX + (int)(barW * Math.Clamp(b / total, 0, 1));
+            Rect(bx - 1, barY - 8, 2, 6, PsgColor);
+            Text("B", bx - 2, barY + barH + 2, PsgColor);
+        }
+
         string text = $"{FormatTime(time)} / {FormatTime(total)}";
         Text(text, x + w - 10 - PixelFont.Measure(text), y + 6, TextColor);
     }
@@ -161,36 +176,167 @@ public sealed partial class VisualizerGame : Game
             active ? activeColor : Dim);
     }
 
+    // Transport bar (design coordinates, set in DrawFooter).
+    private Rectangle _prevHit, _playHit, _nextHit, _loopHit, _volHit, _aHit, _bHit;
+    private bool _volumeDragging;
+
     private void DrawFooter()
     {
         // Kept away from the very bottom edge: a maximised window can have the taskbar over the
-        // last pixels, and the help line must stay readable.
+        // last pixels.
         Rect(0, VH - 56, VW, 44, PanelHi);
         Rect(0, VH - 56, VW, 1, Grid);
 
-        var p = _player;
-        string chipState = p is null ? "" : $"PSG[{(p.PsgEnabled ? "ON" : "OFF")}] SCC[{(p.SccEnabled ? "ON" : "OFF")}]{(p.SoloChannel is int s ? "  SOLO " + ChannelName(s) : "")}";
-        Text(chipState, 16, VH - 50, TextColor);
+        int y = VH - 46;
+        int x = 16;
 
+        _prevHit = new Rectangle(x, y, 26, 18);
+        DrawButton(_prevHit, "<<", false, Accent);
+        x += 30;
+
+        _playHit = new Rectangle(x, y, 48, 18);
+        DrawButton(_playHit, _paused ? "PLAY" : "PAUSE", false, Accent);
+        x += 52;
+
+        _nextHit = new Rectangle(x, y, 26, 18);
+        DrawButton(_nextHit, ">>", false, Accent);
+        x += 38;
+
+        _loopHit = new Rectangle(x, y, 46, 18);
+        DrawButton(_loopHit, "LOOP", _loopEnabled, Accent);
+        x += 54;
+
+        Text("VOL", x, y + 6, Dim);
+        _volHit = new Rectangle(x + 26, y + 6, 96, 8);
+        Rect(_volHit, Grid);
+        Rect(_volHit.X, _volHit.Y, (int)(_volHit.Width * _volume), _volHit.Height, Accent);
+        x += 26 + 96 + 20;
+
+        _aHit = new Rectangle(x, y, 22, 18);
+        DrawButton(_aHit, "A", _player?.LoopA is not null, Accent);
+        _bHit = new Rectangle(x + 26, y, 22, 18);
+        DrawButton(_bHit, "B", _player?.LoopB is not null, Accent);
+        x += 26 + 22 + 22;
+
+        var p = _player;
         if (p is not null)
         {
-            string info = $"PSG {(int)(p.Song.AyClock / 1000)}KHZ  SCC 1789KHZ  OUT 48KHZ  X{p.Oversample}";
-            Text(info, VW - 16 - PixelFont.Measure(info), VH - 50, Dim);
+            string state = $"PSG {(p.PsgEnabled ? "ON" : "OFF")}   SCC {(p.SccEnabled ? "ON" : "OFF")}";
+            if (p.SoloChannel is int solo)
+                state += "   SOLO " + ChannelName(solo);
+            if (p.LoopA is double a && p.LoopB is double b)
+                state += $"   A-B {FormatTime(a)}-{FormatTime(b)}";
+
+            Text(state, x, y + 6, TextColor);
         }
 
-        Text("F2 OPEN FOLDER   O PROFILE   UP/DOWN TRACK   ENTER PLAY   SPACE PAUSE   LEFT/RIGHT SEEK   TAB VIEW", 16, VH - 36, Dim);
-        Text("P PSG   S SCC   1-8 CHANNEL   SHIFT+O CYCLE PROFILE   L AUTONEXT   R RESTART   H HELP   ESC QUIT", 16, VH - 22, Dim);
-
+        const string hint = "H HELP";
         if (_statusTimer > 0)
         {
-            int w = PixelFont.Measure(_status, 2);
-            Text(_status, VW - 16 - w, VH - 82, Accent, 2);
+            int statusWidth = PixelFont.Measure(_status);
+            Text(_status, VW - 16 - statusWidth, y + 6, Accent);
         }
+        else
+        {
+            Text(hint, VW - 16 - PixelFont.Measure(hint), y + 6, Dim);
+        }
+    }
+
+    private void TogglePause()
+    {
+        if (_sound is null)
+            return;
+
+        _paused = !_paused;
+        if (_paused)
+            _sound.Pause();
+        else
+            FlushAudio();
+    }
+
+    private void PrevTrack()
+    {
+        if (_tracks.Count > 0)
+            LoadTrack((_selected - 1 + _tracks.Count) % _tracks.Count);
+    }
+
+    private void NextTrack()
+    {
+        if (_tracks.Count > 0)
+            LoadTrack((_selected + 1) % _tracks.Count);
+    }
+
+    private void ToggleLoop()
+    {
+        _loopEnabled = !_loopEnabled;
+
+        if (_player is not null)
+            _player.LoopEnabled = _loopEnabled;
+
+        _settings.Loop = _loopEnabled;
+        _settings.Save();
+
+        _status = _loopEnabled ? "LOOP ON" : "LOOP OFF";
+        _statusTimer = 2f;
+    }
+
+    private void SetVolumeFromX(int mouseX)
+    {
+        if (_volHit.Width <= 0)
+            return;
+
+        _volume = Math.Clamp((mouseX - _volHit.X) / (float)_volHit.Width, 0f, 1f);
+
+        if (_player is not null)
+            _player.Volume = _volume;
+
+        _settings.Volume = _volume;
+    }
+
+    private void MarkLoopA()
+    {
+        if (_player is null)
+            return;
+
+        if (_player.LoopA is not null && _player.LoopB is not null)
+        {
+            _player.LoopA = null;
+            _player.LoopB = null;
+            _status = "A-B CLEARED";
+        }
+        else
+        {
+            _player.LoopA = _player.Time;
+            if (_player.LoopB is double b && b <= _player.LoopA)
+                _player.LoopB = null;
+
+            _status = "A = " + FormatTime(_player.LoopA.Value);
+        }
+
+        _statusTimer = 2f;
+    }
+
+    private void MarkLoopB()
+    {
+        if (_player is null)
+            return;
+
+        if (_player.LoopA is double a && _player.Time > a)
+        {
+            _player.LoopB = _player.Time;
+            _status = $"A-B {FormatTime(a)}-{FormatTime(_player.LoopB.Value)}";
+        }
+        else
+        {
+            _status = "SET A FIRST (B MUST BE AFTER A)";
+        }
+
+        _statusTimer = 2f;
     }
 
     private void DrawHelp()
     {
-        const int w = 660, h = 416;
+        const int w = 660, h = 462;
         int x = (VW - w) / 2, y = (VH - h) / 2;
         Panel(x, y, w, h, PanelHi);
         Rect(x, y, w, 24, PanelColor);
@@ -201,22 +347,25 @@ public sealed partial class VisualizerGame : Game
             "TAB / HEADER   SPECTRUM / PIANO ROLL / PIANO",
             "F2 / CTRL+O    OPEN FOLDER (RECURSIVE OPTION)",
             "F5             RESCAN THE CURRENT FOLDER",
-            "UP / DOWN      SELECT TRACK",
-            "ENTER          PLAY SELECTED",
+            "UP / DOWN      SELECT AND PLAY A TRACK",
+            "PAGE UP/DOWN   SCROLL THE TRACK LIST",
+            "WHEEL          SCROLL THE TRACK LIST",
             "SPACE          PAUSE / RESUME",
             "LEFT / RIGHT   SEEK -/+ 5 S",
-            "CLICK BAR      SEEK TO POSITION",
-            "CLICK MAP      JUMP ANYWHERE IN THE SONG",
+            "CLICK BAR/MAP  SEEK / JUMP ANYWHERE",
             "CLICK LABEL    SOLO THAT CHANNEL",
             "P / S          TOGGLE PSG / SCC",
             "1 2 3          PSG CHANNELS",
             "4 5 6 7 8      SCC CHANNELS",
             "O              MIXING PROFILE (DIALOG)",
             "SHIFT+O        NEXT PROFILE",
+            "A / B          A-B LOOP (A AGAIN CLEARS)",
             "L              AUTO NEXT",
             "R              RESTART",
             "H              THIS HELP",
             "ESC            CLOSE DIALOG / QUIT",
+            "",
+            "FOOTER: PREV / PLAY-PAUSE / NEXT / LOOP / VOLUME",
             "",
             "PIANO: CLICK AND HOLD A KEY TO PLAY THE SELECTED",
             "CHANNEL'S INSTRUMENT (WORKS WHILE PAUSED); RELEASE",

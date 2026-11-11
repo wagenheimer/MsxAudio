@@ -24,6 +24,14 @@ public sealed partial class VisualizerGame : Game
     private string? _listSelectPath;
     private string? _scanError;
     private volatile int _listScanProgress;
+    // Playlist viewport: the first visible row and the scrollbar geometry (design coordinates).
+    private int _playlistFirst;
+    private int _playlistRows;
+    private int _playlistLastSelected = -1;
+    private Rectangle _playlistRect;
+    private Rectangle _playlistScrollTrack;
+    private Rectangle _playlistScrollThumb;
+    private bool _playlistScrollDragging;
     private Rectangle _openFolderHit;
 
     /// <summary>
@@ -44,6 +52,8 @@ public sealed partial class VisualizerGame : Game
         _listScanning = true;
         _listScanProgress = 0;
         _scanError = null;
+        _playlistFirst = 0;
+        _playlistLastSelected = -1;
 
         CancellationToken token = _listCts.Token;
         _listScan = Task.Run(() =>
@@ -153,6 +163,8 @@ public sealed partial class VisualizerGame : Game
             _sound?.Dispose();
 
             _player = new VgmPlayer(vgm, loop: true, sampleRate: 48000, oversample: _profile.Oversample, profile: _profile);
+            _player.Volume = _volume;
+            _player.LoopEnabled = _loopEnabled;
             ApplyStartupMix(_player);
             _songMap = SongMap.Build(vgm, SongMapBuckets);
             _heldKeyMidi = -1;
@@ -215,6 +227,43 @@ public sealed partial class VisualizerGame : Game
         }
     }
 
+    /// <summary>Moves the viewport so the selected row is visible.</summary>
+    private void EnsureSelectedVisible()
+    {
+        if (_playlistRows <= 0)
+            return;
+
+        if (_selected < _playlistFirst)
+            _playlistFirst = _selected;
+        else if (_selected >= _playlistFirst + _playlistRows)
+            _playlistFirst = _selected - _playlistRows + 1;
+
+        _playlistFirst = Math.Clamp(_playlistFirst, 0, Math.Max(0, _tracks.Count - _playlistRows));
+    }
+
+    /// <summary>Scrolls the playlist by <paramref name="delta"/> rows (wheel uses ±3).</summary>
+    private void ScrollPlaylist(int delta)
+    {
+        if (_tracks.Count <= _playlistRows)
+            return;
+
+        _playlistFirst = Math.Clamp(_playlistFirst + delta, 0, _tracks.Count - _playlistRows);
+    }
+
+    /// <summary>Centres the scrollbar thumb on the mouse (click or drag).</summary>
+    private void ScrollPlaylistTo(int mouseY)
+    {
+        if (_tracks.Count <= _playlistRows || _playlistScrollTrack.Height <= 0)
+            return;
+
+        int listH = _playlistScrollTrack.Height;
+        int thumbH = Math.Max(18, listH * _playlistRows / _tracks.Count);
+        int span = Math.Max(1, listH - thumbH);
+
+        float t = Math.Clamp((mouseY - _playlistScrollTrack.Y - thumbH / 2f) / span, 0f, 1f);
+        _playlistFirst = (int)Math.Round(t * (_tracks.Count - _playlistRows));
+    }
+
     private void DrawPlaylist()
     {
         const int x = 12, y = 52, w = 316, h = 614;
@@ -229,24 +278,41 @@ public sealed partial class VisualizerGame : Game
         Rect(x + 10, y + 24, w - 20, 1, Grid);
 
         int rows = (h - 90) / 18;
-        int first = Math.Max(0, Math.Min(_selected - rows / 2, Math.Max(0, _tracks.Count - rows)));
+        int listTop = y + 28;
+        int listH = rows * 18;
+
+        _playlistRows = rows;
+        _playlistRect = new Rectangle(x, y, w, h);
+
+        // Keep the viewport valid; only snap to the selection when it actually changed (otherwise
+        // scrolling away from the playing track would be impossible).
+        int maxFirst = Math.Max(0, _tracks.Count - rows);
+        _playlistFirst = Math.Clamp(_playlistFirst, 0, maxFirst);
+
+        if (_selected != _playlistLastSelected)
+        {
+            _playlistLastSelected = _selected;
+            EnsureSelectedVisible();
+        }
+
+        int first = _playlistFirst;
 
         _trackHit.Clear();
 
         for (int i = 0; i < rows && first + i < _tracks.Count; i++)
         {
             int index = first + i;
-            int rowY = y + 30 + i * 18;
+            int rowY = listTop + i * 18;
             bool active = index == _selected;
             var entry = _tracks[index];
 
             if (active)
-                Rect(x + 6, rowY - 4, w - 12, 17, PanelHi);
+                Rect(x + 6, rowY - 4, w - 18, 17, PanelHi);
 
-            _trackHit.Add((new Rectangle(x + 4, rowY - 5, w - 8, 18), index));
+            _trackHit.Add((new Rectangle(x + 4, rowY - 5, w - 22, 18), index));
 
             string name = entry.Name.ToUpperInvariant();
-            int maxName = _settings.Recursive ? 18 : 26;
+            int maxName = _settings.Recursive ? 18 : 24;
             if (name.Length > maxName)
                 name = name[..maxName];
 
@@ -263,8 +329,24 @@ public sealed partial class VisualizerGame : Game
             if (entry.Seconds is double seconds)
             {
                 string length = FormatTime(seconds);
-                Text(length, x + w - 12 - PixelFont.Measure(length), rowY, active ? Accent : Dim);
+                Text(length, x + w - 20 - PixelFont.Measure(length), rowY, active ? Accent : Dim);
             }
+        }
+
+        // Scrollbar (only when the list does not fit).
+        _playlistScrollTrack = new Rectangle(x + w - 10, listTop, 6, listH);
+        _playlistScrollThumb = Rectangle.Empty;
+
+        if (_tracks.Count > rows)
+        {
+            Rect(_playlistScrollTrack, Grid);
+
+            int thumbH = Math.Max(18, listH * rows / _tracks.Count);
+            int span = Math.Max(1, listH - thumbH);
+            int thumbY = listTop + (int)Math.Round(span * (_playlistFirst / (float)Math.Max(1, maxFirst)));
+
+            _playlistScrollThumb = new Rectangle(x + w - 10, thumbY, 6, thumbH);
+            Rect(_playlistScrollThumb, new Color(120, 136, 156));
         }
 
         if (_tracks.Count == 0)

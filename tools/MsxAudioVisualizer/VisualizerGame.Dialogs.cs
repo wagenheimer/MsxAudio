@@ -208,6 +208,8 @@ public sealed partial class VisualizerGame : Game
         int? solo = _player.SoloChannel;
         bool psgOn = _player.PsgEnabled;
         bool sccOn = _player.SccEnabled;
+        double? loopA = _player.LoopA;
+        double? loopB = _player.LoopB;
 
         _player.Dispose();
         _player = new VgmPlayer(vgm, loop: true, sampleRate: 48000, oversample: next.Oversample, profile: next);
@@ -219,6 +221,10 @@ public sealed partial class VisualizerGame : Game
         _player.SoloChannel = solo;
         _player.PsgEnabled = psgOn;
         _player.SccEnabled = sccOn;
+        _player.LoopA = loopA;
+        _player.LoopB = loopB;
+        _player.Volume = _volume;
+        _player.LoopEnabled = _loopEnabled;
 
         _profile = next;
         _settings.Profile = next.Name;

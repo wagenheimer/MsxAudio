@@ -74,6 +74,8 @@ public sealed partial class VisualizerGame : Game
     private bool _paused;
     private bool _autoNext = true;
     private bool _showHelp;
+    private float _volume = 1f;
+    private bool _loopEnabled = true;
     private AudioProfile _profile;
 
     // Piano roll: one event list per channel (only on key / pitch changes).
@@ -163,6 +165,9 @@ public sealed partial class VisualizerGame : Game
         _settings = VisualizerSettings.Load();
         if (recursive is not null)
             _settings.Recursive = recursive.Value;
+
+        _volume = Math.Clamp(_settings.Volume, 0f, 1f);
+        _loopEnabled = _settings.Loop;
 
         // CLI wins; otherwise use what the user had last time.
         _profile = profile ?? AudioProfile.ByName(_settings.Profile);
@@ -468,6 +473,8 @@ public sealed partial class VisualizerGame : Game
     {
         _settings.Profile = _profile.Name;
         _settings.View = _view.ToString().ToLowerInvariant();
+        _settings.Volume = _volume;
+        _settings.Loop = _loopEnabled;
 
         try
         {

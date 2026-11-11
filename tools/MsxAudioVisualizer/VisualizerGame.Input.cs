@@ -70,14 +70,15 @@ public sealed partial class VisualizerGame : Game
         if (Pressed(Keys.Enter) && _tracks.Count > 0)
             LoadTrack(_selected);
 
-        if (Pressed(Keys.Space) && _sound is not null)
-        {
-            _paused = !_paused;
-            if (_paused)
-                _sound.Pause();
-            else
-                FlushAudio();
-        }
+        // Page keys move the playlist viewport without changing the current track.
+        if (Pressed(Keys.PageUp))
+            ScrollPlaylist(-Math.Max(1, _playlistRows - 2));
+
+        if (Pressed(Keys.PageDown))
+            ScrollPlaylist(Math.Max(1, _playlistRows - 2));
+
+        if (Pressed(Keys.Space))
+            TogglePause();
 
         if (Pressed(Keys.R) && _player is not null)
         {
@@ -128,6 +129,60 @@ public sealed partial class VisualizerGame : Game
         bool down = _mouse.LeftButton == ButtonState.Pressed;
         bool pressed = down && _prevMouse.LeftButton == ButtonState.Released;
         var p = MouseDesign();
+
+        // Volume: click or drag anywhere on the slider (with some vertical slack).
+        if (!down && _volumeDragging)
+        {
+            _volumeDragging = false;
+            _settings.Save();
+        }
+
+        var volumeArea = new Rectangle(_volHit.X, _volHit.Y - 6, _volHit.Width, _volHit.Height + 12);
+        if (down && (_volumeDragging || (pressed && volumeArea.Contains(p))))
+        {
+            _volumeDragging = true;
+            SetVolumeFromX(p.X);
+            return;
+        }
+
+        // Transport bar: previous / play-pause / next / loop / A-B.
+        if (pressed)
+        {
+            if (_prevHit.Contains(p)) { PrevTrack(); return; }
+            if (_playHit.Contains(p)) { TogglePause(); return; }
+            if (_nextHit.Contains(p)) { NextTrack(); return; }
+            if (_loopHit.Contains(p)) { ToggleLoop(); return; }
+            if (_aHit.Contains(p)) { MarkLoopA(); return; }
+            if (_bHit.Contains(p)) { MarkLoopB(); return; }
+        }
+
+        // Playlist: the wheel scrolls without changing the track; the scrollbar is draggable.
+        int wheel = _mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
+        if (wheel != 0 && _playlistRect.Contains(p) && _tracks.Count > _playlistRows)
+        {
+            ScrollPlaylist(wheel > 0 ? -3 : 3);
+            return;
+        }
+
+        if (_playlistScrollDragging)
+        {
+            if (!down)
+                _playlistScrollDragging = false;
+            else
+            {
+                ScrollPlaylistTo(p.Y);
+                return;
+            }
+        }
+
+        if (down && _playlistScrollThumb != Rectangle.Empty &&
+            (new Rectangle(_playlistScrollTrack.X - 2, _playlistScrollTrack.Y, 10,
+                _playlistScrollTrack.Height)).Contains(p))
+        {
+            _playlistScrollDragging = true;
+            ScrollPlaylistTo(p.Y);
+            return;
+        }
 
         // Piano note held with the mouse: it follows the pointer and stops on release, like a key.
         if (_heldKeyMidi >= 0)

@@ -116,7 +116,8 @@ install).
 | :--- | :--- |
 | `F2` / `Ctrl+O` | open the **folder browser** (recursive option inside) |
 | `F5` | rescan the current folder |
-| `↑` / `↓` | select a track from the folder |
+| `↑` / `↓` | select and play a track |
+| `PgUp` / `PgDn` (or the wheel / scrollbar) | scroll the track list without changing the song |
 | `Enter` (or click) | play the selected track |
 | `Space` | pause / resume |
 | `←` / `→` | seek -/+ 5 s (rebuilds the chip state) |
@@ -125,6 +126,7 @@ install).
 | `4 5 6 7 8` | SCC channels 1..5 |
 | `O` | **mixing profile dialog** (with the details of each profile) |
 | `Shift+O` | cycle the profile without opening the dialog |
+| `A` / `B` | set the **A-B loop** at the current position (`A` twice clears it) |
 | `L` | auto-next |
 | `Tab` (or the header button) | cycle **spectrum** → **piano roll** → **piano** |
 | `R` | restart |
@@ -143,6 +145,9 @@ In the **piano** view:
 What you see:
 
 - **POSITION** bar with `current / total`, the loop window and a marker — click or drag to seek;
+- the **transport bar** at the bottom: previous / play-pause / next, **LOOP**, **volume** and the
+  **A-B loop** (its A/B points also appear on the POSITION bar). The track list scrolls with the
+  wheel, `PgUp`/`PgDn` or its draggable scrollbar;
 - **SPECTRUM** in **dB** (`0` to `-60 dB`) with a frequency axis at **100 Hz / 1 kHz / 10 kHz** and
   **peak-hold caps**, so the quiet harmonics and short transients stay visible;
 - **PIANO ROLL**: the last 12 s with a **mini keyboard** on the left, octave lines, time grid, one
