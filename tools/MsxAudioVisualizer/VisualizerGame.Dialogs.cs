@@ -438,7 +438,7 @@ public sealed partial class VisualizerGame : Game
 
         Point p = MouseDesign();
 
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < AudioProfile.All.Length; i++)
         {
             if (!_profileCardHit[i].Contains(p))
                 continue;
