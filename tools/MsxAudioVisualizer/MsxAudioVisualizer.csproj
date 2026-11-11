@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>MsxAudioVisualizer</AssemblyName>
+    <RootNamespace>Wagenheimer.MsxAudio.Visualizer</RootNamespace>
+    <ApplicationIcon />
+    <Description>Visual VGM player for the Wagenheimer.MsxAudio package (PSG + SCC, per-channel view).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Wagenheimer.MsxAudio\Wagenheimer.MsxAudio.csproj" />
+  </ItemGroup>
+
+</Project>

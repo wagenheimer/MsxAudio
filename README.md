@@ -84,8 +84,36 @@ player.PlaySample("password_key");
 player.Update();                           // mantém a fila de buffers cheia
 ```
 
-## Extrair de uma ROM
+## Player visual (MonoGame)
 
+`tools/MsxAudioVisualizer` é um player gráfico que abre um **VGM** (arquivo, pasta ou *drag & drop*),
+toca em tempo real e mostra tudo o que os chips estão fazendo:
+
+| Tecla | Ação |
+| :--- | :--- |
+| `↑` / `↓` | escolhe a faixa da pasta |
+| `Enter` | toca a faixa selecionada |
+| `Espaço` | pausa / retoma |
+| `←` / `→` | volta/avança 5 s (reconstrói o estado dos chips) |
+| `P` / `S` | liga/desliga **PSG** / **SCC** |
+| `1 2 3` | PSG canais 1..3 |
+| `4 5 6 7 8` | SCC canais 1..5 |
+| `O` | perfil de mixagem (`original` / `stereo` / `remaster`) |
+| `L` | auto-next |
+| `R` | reinicia |
+| `H` | ajuda |
+| `Esc` | sai |
+
+A tela mostra: lista de faixas, **espectro** (FFT log), **osciloscópio** do mix, e uma faixa por
+canal (PSG azul, SCC verde) com **mini-osciloscópio**, volume, nível, **frequência** e **nota**.
+Também dá para gerar um PNG por linha de comando (documentação/CI):
+
+```bash
+dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
+MSXAUDIO_SHOT=shot.png MSXAUDIO_SHOT_FRAME=200 dotnet run --project tools/MsxAudioVisualizer -- "music/stage_a.vgm"
+```
+
+## Extrair de uma ROM
 O extrator dirige o **openMSX** (o emulador faz o trabalho sujo: VDP, CPU, mapper, SCC) e injeta
 `CALL <rotina de som>` com cada id, gravando o VGM. O que muda de jogo para jogo é descrito num
 **perfil JSON** (como chegar numa tela silenciosa, o endereço da rotina e os ids) — nada de
