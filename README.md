@@ -39,8 +39,7 @@ dotnet add package Wagenheimer.MsxAudio.MonoGame  # optional MonoGame bridge
 - [Screens](#screens)
 - [The `.msxaudio` format](#the-msxaudio-format)
 - [Playback engine](#playback-engine)
-- [Extracting music from a ROM](#extracting-music-from-a-rom)
-- [CLI](#cli)
+- [Extracting music from a ROM](#extracting-music-from-a-rom)- [CLI](#cli)
 - [Mixing profiles](#mixing-profiles)
 - [Validation](#validation)
 - [Architecture](#architecture)
@@ -283,6 +282,13 @@ clips/jump.vgm
 - **Mute/solo aware**: profiles and per-channel gain changes apply without a pop.
 
 ## Extracting music from a ROM
+
+There is **no standard music format on MSX**: each game ships its own driver, and the music only
+exists while that driver runs. So nothing here "decodes" a file — the cartridge's driver is executed
+on a minimal MSX machine and its PSG/SCC writes are recorded.
+
+> **Deep dive:** [`docs/EXTRACTION.md`](docs/EXTRACTION.md) — the machine, the three modes (capture /
+> scan / profile), what works per game and the known limits.
 
 The extractor drives **openMSX** (the emulator does the hard part: VDP, CPU, mapper, SCC) and injects
 `CALL <sound routine>` with each id, recording the VGM. What changes from game to game lives in a
