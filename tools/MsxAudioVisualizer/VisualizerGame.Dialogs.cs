@@ -35,7 +35,10 @@ public sealed partial class VisualizerGame : Game
     private CancellationTokenSource? _browserCts;
     private int _browserWheel;
     private string _browserPattern = "*.vgm";
-    private bool _browserPickRom;
+    private BrowserPick _browserPick;
+
+    /// <summary>What the folder browser is choosing, if anything (it returns to the extract dialog).</summary>
+    private enum BrowserPick { None, Rom, Profile }
     private readonly List<(Rectangle Rect, int Index)> _browserDirHit = new();
     private readonly List<(Rectangle Rect, int Index)> _browserFileHit = new();
     private readonly List<(Rectangle Rect, string Path)> _browserCrumbHit = new();
@@ -59,7 +62,7 @@ public sealed partial class VisualizerGame : Game
 
         _dialog = DialogKind.Folder;
         _browserPattern = "*.vgm";
-        _browserPickRom = false;
+        _browserPick = BrowserPick.None;
         _browserRecursive = _settings.Recursive;
         _browserFocusFiles = false;
         _browserWheel = _mouse.ScrollWheelValue;
@@ -80,7 +83,26 @@ public sealed partial class VisualizerGame : Game
 
         _dialog = DialogKind.Folder;
         _browserPattern = "*.rom";
-        _browserPickRom = true;
+        _browserPick = BrowserPick.Rom;
+        _browserRecursive = false;
+        _browserFocusFiles = true;
+        _browserWheel = _mouse.ScrollWheelValue;
+        LoadBrowserFolder(dir);
+    }
+
+    /// <summary>Folder browser in "pick a profile JSON" mode.</summary>
+    private void OpenProfileBrowser()
+    {
+        string dir = _extractProfile.Length > 0
+            ? Path.GetDirectoryName(_extractProfile) ?? Directory.GetCurrentDirectory()
+            : Directory.GetCurrentDirectory();
+
+        if (!Directory.Exists(dir))
+            dir = Directory.GetCurrentDirectory();
+
+        _dialog = DialogKind.Folder;
+        _browserPattern = "*.json";
+        _browserPick = BrowserPick.Profile;
         _browserRecursive = false;
         _browserFocusFiles = true;
         _browserWheel = _mouse.ScrollWheelValue;
@@ -191,12 +213,12 @@ public sealed partial class VisualizerGame : Game
     /// </summary>
     private void CancelFolderDialog()
     {
-        bool backToExtract = _browserPickRom;
+        bool backToExtract = _browserPick != BrowserPick.None;
         CloseDialog();
 
         if (backToExtract)
         {
-            _browserPickRom = false;
+            _browserPick = BrowserPick.None;
             _dialog = DialogKind.Extract;
         }
     }
@@ -215,10 +237,16 @@ public sealed partial class VisualizerGame : Game
 
         VgmEntry entry = _browserFiles[Math.Clamp(_browserFileSel, 0, _browserFiles.Count - 1)];
 
-        // "Pick a cartridge": hand the path back to the extraction dialog instead of playing it.
-        if (_browserPickRom)
+        // "Pick a cartridge (or a profile)": hand the path back to the extraction dialog.
+        if (_browserPick == BrowserPick.Rom)
         {
             PickRom(entry.Path);
+            return;
+        }
+
+        if (_browserPick == BrowserPick.Profile)
+        {
+            PickProfile(entry.Path);
             return;
         }
 
@@ -558,7 +586,12 @@ public sealed partial class VisualizerGame : Game
         const int dx = 190, dy = 100, dw = 900, dh = 520;
         Panel(dx, dy, dw, dh);
         Rect(dx, dy, dw, 24, PanelColor);
-        Text(_browserPickRom ? "SELECT A CARTRIDGE (.ROM)" : "OPEN FOLDER", dx + 12, dy + 8, Accent);
+        Text(_browserPick switch
+        {
+            BrowserPick.Rom => "SELECT A CARTRIDGE (.ROM)",
+            BrowserPick.Profile => "SELECT AN EXTRACTION PROFILE (.JSON)",
+            _ => "OPEN FOLDER",
+        }, dx + 12, dy + 8, Accent);
 
         _browserCloseHit = new Rectangle(dx + dw - 24, dy + 4, 16, 16);
         DrawButton(_browserCloseHit, "X", false, Warn);
@@ -729,10 +762,11 @@ public sealed partial class VisualizerGame : Game
         DrawButton(_browserCancelHit, "CANCEL", false, Dim);
 
         _browserPlayHit = new Rectangle(dx + dw - 176, barY + 12, 76, 18);
-        DrawButton(_browserPlayHit, _browserPickRom ? "USE" : "PLAY", true, Accent);
+        DrawButton(_browserPlayHit, _browserPick == BrowserPick.None ? "PLAY" : "USE", true, Accent);
 
-        Text(_browserPickRom ? "ENTER USES THIS ROM · BACKSPACE UP · F5 RESCAN"
-                             : "ENTER PLAYS · BACKSPACE UP · F5 RESCAN",
+        Text(_browserPick == BrowserPick.None
+                ? "ENTER PLAYS · BACKSPACE UP · F5 RESCAN"
+                : $"ENTER USES THIS FILE · BACKSPACE UP · F5 RESCAN",
             dx + 12, barY + 34, Dim);
     }
 

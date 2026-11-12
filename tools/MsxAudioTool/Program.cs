@@ -32,6 +32,7 @@ internal static class Program
                 "import" => Import(args.Skip(1).ToArray()),
                 "extract" => Extract(args.Skip(1).ToArray()),
                 "extract-direct" => ExtractDirect(args.Skip(1).ToArray()),
+                "scan" => Scan(args.Skip(1).ToArray()),
                 "probe" => Probe(args.Skip(1).ToArray()),
                 "capture" => Capture(args.Skip(1).ToArray()),
                 "render" => Render(args.Skip(1).ToArray()),
@@ -59,6 +60,8 @@ internal static class Program
                     drive openMSX to record a ROM's VGMs and build the package
               extract-direct <rom> <out.msxaudio> --profile profile.json
                     run the cartridge driver in process (no external emulator, experimental)
+              scan <rom> <out.msxaudio> [--ids 1-63] [--call ADDR] [--player ADDR] [--profile p.json]
+                    try every sound id, keep what produces sound (no profile needed)
               probe <rom>
                     boot the ROM in the built-in machine and dump the hook state (diagnostics)
               capture <rom> <out.vgm> [--seconds N] [--mapper ...]
@@ -163,6 +166,117 @@ internal static class Program
         result.Library.Save(args[1]);
         Console.WriteLine($"{result.Library.Songs.Count} songs, {result.Library.Clips.Count} effects -> {args[1]}");
         return 0;
+    }
+
+    /// <summary>
+    /// Tries every sound id on a ROM and keeps the ones that produce sound. Without a profile the
+    /// extraction routine is found by probing the routines that write to the PSG/SCC.
+    /// </summary>
+    private static int Scan(string[] args)
+    {
+        if (args.Length < 2)
+            return Usage("scan <rom> <out.msxaudio> [--ids 1-63] [--call ADDR] [--player ADDR] [--profile p.json]");
+
+        var profile = args.Any(a => a == "--profile") ? LoadProfile(args) : null;
+
+        var options = new RomScanOptions
+        {
+            RomPath = args[0],
+            Mapper = RomMapperNames.Parse(Value(args, "--mapper") ?? profile?.RomType),
+            SoundCallAddress = ParseAddress(Value(args, "--call")) ?? profile?.SoundCallAddress ?? 0,
+            PlayerAddress = ParseAddress(Value(args, "--player")) ?? profile?.PlayerAddress ?? 0,
+            IdMask = int.TryParse(Value(args, "--id-mask") ?? "", out int mask) ? mask : profile?.IdMask ?? 0,
+            StopId = profile?.StopId ?? 0,
+            SecondsPerId = double.TryParse(Value(args, "--seconds") ?? "", out double seconds) ? seconds : 12,
+            FirstId = profile is { Ids.Count: > 0 } ? profile.Ids.Min() : 1,
+            LastId = profile is { Ids.Count: > 0 } ? profile.Ids.Max() : 63,
+        };
+
+        if (profile is not null)
+            options.ResetAddresses.AddRange(profile.ResetAddresses);
+
+        if (Value(args, "--reset") is { Length: > 0 } resets)
+        {
+            foreach (string part in resets.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                if (ParseAddress(part) is int address)
+                    options.ResetAddresses.Add(address);
+        }
+
+        if (Value(args, "--ids") is { Length: > 0 } range &&
+            TryParseRange(range, out int first, out int last))
+        {
+            options = new RomScanOptions
+            {
+                RomPath = options.RomPath,
+                Mapper = options.Mapper,
+                SoundCallAddress = options.SoundCallAddress,
+                PlayerAddress = options.PlayerAddress,
+                IdMask = options.IdMask,
+                StopId = options.StopId,
+                SecondsPerId = options.SecondsPerId,
+                FirstId = first,
+                LastId = last,
+            };
+
+            if (profile is not null)
+                options.ResetAddresses.AddRange(profile.ResetAddresses);
+        }
+
+        var result = RomSoundScan.Run(options, Console.WriteLine);
+
+        if (result.Songs.Count == 0)
+        {
+            Console.WriteLine("no sound found");
+            return 1;
+        }
+
+        using var library = result.ToLibrary(Path.GetFileNameWithoutExtension(args[0]), profile?.Names);
+        library.Save(args[1]);
+        Console.WriteLine($"{result.Songs.Count} sound(s), {result.Duplicates} duplicate(s) -> {args[1]}");
+        return 0;
+    }
+
+    /// <summary>Parses <c>0x7AA9</c>, <c>7AA9h</c> or a decimal address.</summary>
+    private static int? ParseAddress(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        text = text.Trim();
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            return int.TryParse(text[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int hex) ? hex : null;
+
+        if (text.EndsWith("h", StringComparison.OrdinalIgnoreCase))
+            return int.TryParse(text[..^1], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int hexH) ? hexH : null;
+
+        return int.TryParse(text, out int value) ? value : null;
+    }
+
+    /// <summary>Parses <c>1-63</c> or a comma separated list.</summary>
+    private static bool TryParseRange(string text, out int first, out int last)
+    {
+        first = 1;
+        last = 63;
+
+        text = text.Trim();
+        int dash = text.IndexOf('-');
+        if (dash > 0)
+        {
+            return int.TryParse(text[..dash].Trim(), out first) &&
+                   int.TryParse(text[(dash + 1)..].Trim(), out last);
+        }
+
+        string[] parts = text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+            return false;
+
+        if (int.TryParse(parts[0], out first))
+        {
+            last = int.TryParse(parts[^1], out int end) && parts.Length > 1 ? end : first;
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>

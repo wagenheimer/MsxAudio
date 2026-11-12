@@ -98,6 +98,26 @@ public sealed class RomExtractionProfile
     public Dictionary<int, string> Names { get; set; } = new();
 }
 
+/// <summary>Reads and writes <see cref="RomExtractionProfile"/> JSON files.</summary>
+public static class RomExtractionProfiles
+{
+    private static readonly System.Text.Json.JsonSerializerOptions Options = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    /// <summary>Loads a profile (throws <see cref="InvalidDataException"/> when it is unusable).</summary>
+    public static RomExtractionProfile Load(string path) =>
+        System.Text.Json.JsonSerializer.Deserialize<RomExtractionProfile>(System.IO.File.ReadAllText(path), Options)
+        ?? throw new InvalidDataException($"invalid profile: {path}");
+
+    /// <summary>Writes a profile.</summary>
+    public static void Save(RomExtractionProfile profile, string path) =>
+        System.IO.File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(profile, Options));
+}
+
 /// <summary>Options for the extraction process.</summary>
 public sealed class RomExtractionOptions
 {

@@ -180,10 +180,10 @@ In the **piano** view:
 | <img src="docs/media/piano.png" width="100%"> | <img src="docs/media/folder-browser.png" width="100%"> |
 | **Mixing profiles** | **Help** (with the build version) |
 | <img src="docs/media/profiles.png" width="100%"> | <img src="docs/media/help.png" width="100%"> |
-| **Extract from ROM** (any cartridge, no profile) | **Cartridge picker** (`*.rom`, breadcrumb) |
-| <img src="docs/media/extract.png" width="100%"> | <img src="docs/media/rom-picker.png" width="100%"> |
-| **A `.msxaudio` package in the playlist** (King's Valley 1) | |
-| <img src="docs/media/extract-result.png" width="100%"> | |
+| **Extract from ROM** (any cartridge, no profile) | **Profile mode** (full song list, named) |
+| <img src="docs/media/extract.png" width="100%"> | <img src="docs/media/extract-profile.png" width="100%"> |
+| **Cartridge picker** (`*.rom`, breadcrumb) | **A `.msxaudio` package in the playlist** |
+| <img src="docs/media/rom-picker.png" width="100%"> | <img src="docs/media/extract-result.png" width="100%"> |
 
 What you see:
 
@@ -226,6 +226,13 @@ MSXAUDIO_SHOT=shot.png MSXAUDIO_SHOT_FRAME=200 dotnet run --project tools/MsxAud
 MSXAUDIO_DIALOG=extract MSXAUDIO_ROM=game.rom MSXAUDIO_ROM_KEYS=START@1 \
   MSXAUDIO_ROM_SECONDS=20 MSXAUDIO_EXTRACT=1 \
   MSXAUDIO_SHOT=extract.png MSXAUDIO_SHOT_FRAME=200 dotnet run --project tools/MsxAudioVisualizer
+
+# same, but in PROFILE mode (all songs by id) or running the id scan
+MSXAUDIO_DIALOG=extract MSXAUDIO_ROM=kv1.rom MSXAUDIO_ROM_PROFILE=profiles/kingsvalley1.json \
+  MSXAUDIO_EXTRACT=1 MSXAUDIO_SHOT=extract-profile.png MSXAUDIO_SHOT_FRAME=20 \
+  dotnet run --project tools/MsxAudioVisualizer
+MSXAUDIO_DIALOG=extract MSXAUDIO_ROM=game.rom MSXAUDIO_EXTRACT=scan \
+  MSXAUDIO_SHOT=scan.png MSXAUDIO_SHOT_FRAME=4000 dotnet run --project tools/MsxAudioVisualizer
 
 # record a GIF with the built-in encoder (no ffmpeg needed), 640×360 — GIF is silent by format
 MSXScope music/stage_a.vgm --record out.gif --seconds 10 --fps 15
@@ -339,6 +346,33 @@ opens a dialog where you pick the cartridge (its own `.rom` browser), the mapper
 and the button script. The result is written next to the ROM as `<rom>_capture.vgm` and loaded
 straight into the player — no profile, no emulator, no CLI.
 
+The dialog has **three ways** to get music out, from the most generic to the most complete:
+
+| Mode | What it does | When to use |
+| :--- | :--- | :--- |
+| **CAPTURE** | boots the ROM and records what it plays after the key script | any cartridge; grabs a title theme or a gameplay window |
+| **PROFILE** | reads a `.json` with the driver's addresses, ids and names | the full song list, with names (see `profiles/`) |
+| **FIND ALL SONGS** | probes the ids the driver accepts and keeps what makes sound | no profile yet: gives you a first list named `id_NN` |
+
+The **FIND ALL SONGS** mode also works from the CLI:
+
+```bash
+# with a profile: uses its driver addresses and its id range
+MsxAudioTool scan kv1.rom kv1_songs.msxaudio --profile profiles/kingsvalley1.json
+
+# without one: probes the routines that write to the PSG/SCC, then every id
+MsxAudioTool scan game.rom game_songs.msxaudio --seconds 12
+```
+
+Ids come out as `id_NN`; music is told from effects by looking for a loop (or by the sound still
+filling the capture), duplicate streams are dropped, and the result is a `.msxaudio` you can open in
+the player and rename.
+
+| Game | Scan result |
+| :--- | :--- |
+| King's Valley 1 (16 KB, PSG) | 24 sounds in the id range 1–31 (8 songs + 8 effects when labelled by the profile) |
+| King's Valley II (128 KB, Konami SCC) | 65 sounds, 5 duplicate ids dropped |
+
 | Key script | Meaning |
 | :--- | :--- |
 | `START@1` | joystick trigger A one second after boot (the usual "press start") |
@@ -393,6 +427,7 @@ MsxAudioTool info <package.msxaudio>
 MsxAudioTool extract <rom> <out.msxaudio> --profile profile.json [--openmsx path]
 MsxAudioTool extract-direct <rom> <out.msxaudio> --profile profile.json
 MsxAudioTool capture <rom> <out.vgm> [--seconds N] [--mapper M] [--keys "START@1,RIGHT@3"]
+MsxAudioTool scan <rom> <out.msxaudio> [--ids 1-63] [--call ADDR] [--player ADDR] [--profile p.json]
 MsxAudioTool probe <rom> [--mapper M]
 MsxAudioTool render <package.msxaudio> <id|all> <out.wav> [--profile original|stereo|remaster]
 MsxAudioTool verify <vgm> <capture.wav>

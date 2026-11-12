@@ -22,7 +22,11 @@ namespace Wagenheimer.MsxAudio.Extraction;
 public static class DirectRomExtractor
 {
     /// <summary>Runs the extraction.</summary>
-    public static ExtractionResult Extract(RomExtractionOptions options, Action<string>? log = null)
+    /// <param name="options">ROM, profile and output settings.</param>
+    /// <param name="log">Receives progress lines.</param>
+    /// <param name="progress">Receives (done, total) ids, for a progress bar.</param>
+    public static ExtractionResult Extract(RomExtractionOptions options, Action<string>? log = null,
+        Action<int, int>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         if (!File.Exists(options.RomPath))
@@ -46,6 +50,7 @@ public static class DirectRomExtractor
         var library = new MsxAudioLibrary(profile.Name);
         library.Manifest.Source = $"direct driver run ({Path.GetFileName(options.RomPath)})";
         var files = new Dictionary<int, string>();
+        int done = 0;
 
         foreach (int id in profile.Ids)
         {
@@ -97,6 +102,8 @@ public static class DirectRomExtractor
             files[id] = song.Entry;
             log?.Invoke($"{name,-16} id {id,2}  {vgm.TotalSeconds,7:F2}s  {vgm.Events.Count,6} writes  " +
                         (vgm.HasLoop ? $"loop {vgm.LoopStartSeconds:F3}s + {vgm.LoopSeconds:F3}s" : "no loop"));
+
+            progress?.Invoke(++done, profile.Ids.Count);
         }
 
         return new ExtractionResult { Library = library, VgmFiles = files };

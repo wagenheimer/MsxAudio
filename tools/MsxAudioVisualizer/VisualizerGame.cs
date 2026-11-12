@@ -308,8 +308,8 @@ public sealed partial class VisualizerGame : Game
                 OpenExtractDialog();
 
                 // Docs/CI gate: start the capture without a click (MSXAUDIO_EXTRACT=1).
-                if (Environment.GetEnvironmentVariable("MSXAUDIO_EXTRACT") is { Length: > 0 })
-                    StartExtraction();
+                if (Environment.GetEnvironmentVariable("MSXAUDIO_EXTRACT") is { Length: > 0 } job)
+                    StartExtraction(scan: job.Equals("scan", StringComparison.OrdinalIgnoreCase));
             }
         }
 

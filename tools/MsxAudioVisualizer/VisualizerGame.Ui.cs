@@ -409,8 +409,7 @@ public sealed partial class VisualizerGame : Game
         {
             "TAB / HEADER   SPECTRUM / PIANO ROLL / PIANO",
             "F2 / CTRL+O    OPEN FOLDER (RECURSIVE OPTION)",
-            "F3             EXTRACT MUSIC FROM A CARTRIDGE",
-            "F5             RESCAN THE CURRENT FOLDER",
+            "F3             EXTRACT MUSIC FROM A CARTRIDGE",            "F5             RESCAN THE CURRENT FOLDER",
             "UP / DOWN      SELECT AND PLAY A TRACK",
             "PAGE UP/DOWN   SCROLL THE TRACK LIST",
             "WHEEL          SCROLL THE TRACK LIST",
