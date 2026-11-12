@@ -34,3 +34,7 @@ _export/
 !docs/**/*.wav
 *.vgm
 !tests/**/*.vgm
+
+# Git Bash crash dumps
+*.stackdump
+*.stackdump.meta
