@@ -155,9 +155,11 @@ public static class AutoMixAnalyzer
         var tracks = Enumerable.Range(0, 8).Select(_ => new Track()).ToArray();
         double last = 0;
 
-        foreach (VgmEvent e in vgm.Events)
+        IReadOnlyList<VgmEvent> events = vgm.Events;
+
+        for (int index = 0; index < events.Count;)
         {
-            double now = e.Sample / 44100.0;
+            double now = events[index].Sample / 44100.0;
             double dt = now - last;
             last = now;
 
@@ -182,22 +184,30 @@ public static class AutoMixAnalyzer
                 }
             }
 
-            if (e.Kind == VgmEventKind.Psg)
+            // All the writes of one instant are applied before the registers are read: a pitch is two
+            // bytes, and the half-written one is not a note.
+            long sample = events[index].Sample;
+            for (; index < events.Count && events[index].Sample == sample; index++)
             {
-                if (e.P0 < psg.Length)
-                    psg[e.P0] = e.P1;
-            }
-            else if (e.P0 == 1 && e.P1 < sccRegs.Length)
-            {
-                sccRegs[e.P1] = e.P2;
-            }
-            else if (e.P0 == 2 && e.P1 < sccVolume.Length)
-            {
-                sccVolume[e.P1] = e.P2 & 0x0F;
-            }
-            else if (e.P0 == 3)
-            {
-                sccEnable = e.P2;
+                VgmEvent e = events[index];
+
+                if (e.Kind == VgmEventKind.Psg)
+                {
+                    if (e.P0 < psg.Length)
+                        psg[e.P0] = e.P1;
+                }
+                else if (e.P0 == 1 && e.P1 < sccRegs.Length)
+                {
+                    sccRegs[e.P1] = e.P2;
+                }
+                else if (e.P0 == 2 && e.P1 < sccVolume.Length)
+                {
+                    sccVolume[e.P1] = e.P2 & 0x0F;
+                }
+                else if (e.P0 == 3)
+                {
+                    sccEnable = e.P2;
+                }
             }
 
             for (int c = 0; c < 8; c++)

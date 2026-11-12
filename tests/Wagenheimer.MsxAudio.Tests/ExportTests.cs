@@ -95,8 +95,125 @@ public class ExportTests
         Assert.Contains(36, bass);                             // 65.41 Hz = C2
         Assert.Contains(72, tune);                             // 523.25 Hz = C5
         Assert.Contains(67, tune);                             // 783.99 Hz = G5 is 79; 392 Hz = G4 is 67
-        Assert.True(arpeggio.Count > 100, "the arpeggio notes are kept one by one");
-        Assert.Equal(new[] { 60, 64, 67 }, arpeggio.Take(3));  // C4 E4 G4
+
+        // The arpeggio (C4 E4 G4 cycling every 1/48 s) is the chord, held: three notes, not 288.
+        Assert.Equal(new[] { 60, 64, 67 }, arpeggio.OrderBy(n => n));
+    }
+
+    [Fact]
+    public void Midi_CanKeepTheArpeggioNoteByNote()
+    {
+        byte[] bytes = MidiExporter.Export(AutoMixTests.BuildSong(), "raw", new MidiOptions { ArpeggiosAsChords = false });
+        List<int> arpeggio = NotesOn(ParseMidi(bytes).Tracks[3]);
+
+        Assert.True(arpeggio.Count > 100);
+        Assert.Equal(new[] { 60, 64, 67 }, arpeggio.Take(3));
+    }
+
+    [Fact]
+    public void Transcriber_KeepsVibratoAsOneNoteWithPitchBend()
+    {
+        var script = new AutoMixTests.Script();
+        script.Psg(7, 0x38);
+
+        // A held A4 wobbling by a semitone every 1/50 s for 2 s: one note, not a hundred.
+        for (int i = 0; i < 100; i++)
+        {
+            script.Note(0, i % 2 == 0 ? 440.0 : 466.16, 12);
+            script.Wait(0.02);
+        }
+
+        List<TranscribedNote> notes = VgmTranscriber.Transcribe(script.Build());
+
+        Assert.Single(notes);
+        Assert.Equal(69, notes[0].Midi);
+        Assert.True(notes[0].Bend is { Count: > 20 }, "the wobble is kept as pitch bend");
+    }
+
+    [Fact]
+    public void Transcriber_MergesAFlickerAndDropsAGlitch()
+    {
+        var script = new AutoMixTests.Script();
+        script.Psg(7, 0x38);
+
+        script.Note(0, 440.0, 12);
+        script.Wait(0.3);
+        script.Psg(8, 0);                                       // off for 20 ms ...
+        script.Wait(0.02);
+        script.Note(0, 440.0, 12);                              // ... and on again: the same note
+        script.Wait(0.3);
+        script.Psg(8, 0);
+        script.Wait(0.2);
+        script.Note(0, 880.0, 12);                              // a 15 ms blip: a glitch
+        script.Wait(0.015);
+        script.Psg(8, 0);
+        script.Wait(0.5);
+
+        List<TranscribedNote> notes = VgmTranscriber.Transcribe(script.Build());
+
+        Assert.Single(notes);
+        Assert.InRange(notes[0].End - notes[0].Start, 0.6, 0.7);
+    }
+
+    [Fact]
+    public void Tempo_IsFoundAndTheNotesLandOnTheGrid()
+    {
+        var script = new AutoMixTests.Script();
+        script.Psg(7, 0x38);
+
+        // Eighth notes at 132 BPM (0.2273 s each), a little off the beat like a human or a driver.
+        double eighth = 60.0 / 132 / 2;
+        var random = new Random(7);
+        double[] melody = { 523.25, 587.33, 659.25, 783.99, 659.25, 587.33, 523.25, 392.0 };
+
+        double clock = 0;
+        for (int i = 0; i < 64; i++)
+        {
+            double wobble = (random.NextDouble() - 0.5) * 0.012;
+            script.Note(0, melody[i % melody.Length], 12);
+            script.Wait(eighth * 0.8 + wobble);
+            script.Psg(8, 0);
+            script.Wait(eighth * 0.2 - wobble);
+            clock += eighth;
+        }
+
+        VgmFile song = script.Build();
+        List<TranscribedNote> notes = VgmTranscriber.Transcribe(song);
+        MidiExporter.Tempo tempo = MidiExporter.EstimateTempo(notes);
+
+        Assert.True(tempo.Confident);
+        Assert.InRange(tempo.Bpm, 131.0, 133.0);
+
+        // In the file, every note starts on a 16th-note grid line (120 ticks).
+        Midi midi = ParseMidi(MidiExporter.Export(song, "steady"));
+        var starts = midi.Tracks[1].Where(e => (e.Status & 0xF0) == 0x90 && e.B > 0).Select(e => e.Tick).ToList();
+
+        Assert.NotEmpty(starts);
+        Assert.All(starts, tick => Assert.Equal(0, tick % 120));
+    }
+
+    [Fact]
+    public void Midi_FollowsTheChipVolumeWithExpression()
+    {
+        var script = new AutoMixTests.Script();
+        script.Psg(7, 0x38);
+
+        script.Note(0, 440.0, 15);
+        for (int volume = 14; volume >= 3; volume--)             // a decaying note
+        {
+            script.Wait(0.06);
+            script.Psg(8, (byte)volume);
+        }
+
+        script.Wait(0.1);
+        script.Psg(8, 0);
+        script.Wait(0.3);
+
+        Midi midi = ParseMidi(MidiExporter.Export(script.Build(), "decay"));
+        var expression = midi.Tracks[1].Where(e => (e.Status & 0xF0) == 0xB0 && e.A == 11).Select(e => (int)e.B).ToList();
+
+        Assert.True(expression.Count >= 5, "the decay is written as expression (CC11)");
+        Assert.True(expression[0] > expression[^1], "and it goes down");
     }
 
     [Fact]

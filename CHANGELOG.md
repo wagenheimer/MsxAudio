@@ -16,6 +16,12 @@ All notable changes to this package are documented here. The format follows
   **WAV**, **MP3** (LAME, 128-320 kbps, ID3 title) and/or **MIDI** (the notes, one track per voice and a
   drum track, loop markers). WAV and MP3 repeat the loop N times and fade out
   (`AudioExporter`, `MidiExporter`, `VgmTranscriber`).
+- **Better MIDI**: the tempo is detected (BPM from where the melody, bass and drums start) and the
+  notes are snapped to a 16th-note grid; arpeggios become the held chord instead of hundreds of 20 ms
+  notes; vibrato and slides are pitch bend (range 2 semitones, set by RPN); the chip volume is MIDI
+  expression (CC11); retriggers within 40 ms are one note and glitches under 40 ms are dropped. A
+  pitch written as two bytes at the same instant is read once, so no phantom notes. Options in the
+  export dialog.
 - **Transport**: drawn icons, a real stop, previous restarts the song after 3 s, and an AT END choice
   (LOOP / NEXT / STOP).
 

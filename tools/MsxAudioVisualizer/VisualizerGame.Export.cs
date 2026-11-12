@@ -20,6 +20,7 @@ namespace Wagenheimer.MsxAudio.Visualizer;
 public sealed partial class VisualizerGame
 {
     private bool _expWav = true, _expMp3, _expMidi;
+    private bool _expQuantize = true, _expChords = true;     // MIDI: notes on a 16th grid; arpeggios as held chords
     private int _expScope;                              // 0 = this song, 1 = every song in the list
     private int _expLoops = 2;
     private int _expFade = 3;
@@ -40,7 +41,7 @@ public sealed partial class VisualizerGame
 
     private Rectangle _expCloseHit, _expThisHit, _expAllHit, _expWavHit, _expMp3Hit, _expMidiHit, _expFolderHit,
         _expPasteHit, _expOpenHit, _expStartHit, _expCancelHit, _expLoopMinusHit, _expLoopPlusHit,
-        _expFadeMinusHit, _expFadePlusHit;
+        _expFadeMinusHit, _expFadePlusHit, _expQuantizeHit, _expChordsHit;
     private readonly Rectangle[] _expBitrateHit = new Rectangle[4];
 
     private static readonly int[] Bitrates = { 128, 192, 256, 320 };
@@ -139,6 +140,8 @@ public sealed partial class VisualizerGame
         if (_expWavHit.Contains(p)) { _expWav = !_expWav; return; }
         if (_expMp3Hit.Contains(p)) { _expMp3 = !_expMp3; return; }
         if (_expMidiHit.Contains(p)) { _expMidi = !_expMidi; return; }
+        if (_expQuantizeHit.Contains(p)) { _expQuantize = !_expQuantize; return; }
+        if (_expChordsHit.Contains(p)) { _expChords = !_expChords; return; }
         if (_expLoopMinusHit.Contains(p)) { _expLoops = Math.Max(1, _expLoops - 1); return; }
         if (_expLoopPlusHit.Contains(p)) { _expLoops = Math.Min(8, _expLoops + 1); return; }
         if (_expFadeMinusHit.Contains(p)) { _expFade = Math.Max(0, _expFade - 1); return; }
@@ -230,6 +233,7 @@ public sealed partial class VisualizerGame
         AudioProfile profile = _profile;
         string folder = _expFolder;
         bool wav = _expWav, mp3 = _expMp3, midi = _expMidi;
+        var midiOptions = new MidiOptions { Quantize = _expQuantize, ArpeggiosAsChords = _expChords };
         int loops = _expLoops, fade = _expFade, bitrate = _expBitrate;
 
         _expMessage = null;
@@ -278,7 +282,7 @@ public sealed partial class VisualizerGame
 
                     if (midi)
                     {
-                        File.WriteAllBytes(Path.Combine(folder, stem + ".mid"), MidiExporter.Export(item.Vgm, item.Name));
+                        File.WriteAllBytes(Path.Combine(folder, stem + ".mid"), MidiExporter.Export(item.Vgm, item.Name, midiOptions));
                         files++;
                     }
 
@@ -351,12 +355,13 @@ public sealed partial class VisualizerGame
 
     private void DrawExportDialog()
     {
-        const int dw = 700, dh = 420;
+        const int dw = 700, dh = 452;
         int dx = (VW - dw) / 2, dy = 110;
 
         _expCloseHit = _expThisHit = _expAllHit = _expWavHit = _expMp3Hit = _expMidiHit = _expFolderHit =
             _expPasteHit = _expOpenHit = _expStartHit = _expCancelHit = Rectangle.Empty;
         _expLoopMinusHit = _expLoopPlusHit = _expFadeMinusHit = _expFadePlusHit = Rectangle.Empty;
+        _expQuantizeHit = _expChordsHit = Rectangle.Empty;
         Array.Fill(_expBitrateHit, Rectangle.Empty);
 
         Panel(dx, dy, dw, dh);
@@ -388,6 +393,15 @@ public sealed partial class VisualizerGame
         DrawButton(_expMidiHit, "MIDI", _expMidi, Accent);
 
         Text("WAV LOSSLESS · MP3 SMALL · MIDI = THE NOTES, FOR A DAW", fieldX + 216, y + 6, Dim);
+
+        // MIDI clean-up: what turns the raw register stream into something playable and editable.
+        y += 26;
+        Text("MIDI", labelX, y + 6, _expMidi ? Dim : Grid);
+        _expQuantizeHit = new Rectangle(fieldX, y, 150, 18);
+        DrawButton(_expQuantizeHit, "TEMPO + 16TH GRID", _expQuantize, _expMidi ? Accent : Dim);
+        _expChordsHit = new Rectangle(fieldX + 158, y, 170, 18);
+        DrawButton(_expChordsHit, "ARPEGGIOS AS CHORDS", _expChords, _expMidi ? Accent : Dim);
+        Text("BPM FOUND · VIBRATO = BEND", fieldX + 338, y + 6, Dim);
 
         // The mix.
         y += 28;
