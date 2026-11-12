@@ -661,7 +661,7 @@ docs/                                 EXTRACTION.md (deep dive), screenshots
 
 ## Versioning
 
-The library follows [Semantic Versioning](https://semver.org/) (`Wagenheimer.MsxAudio` is at 1.0.0) and the changelog is in
+The library follows [Semantic Versioning](https://semver.org/) (`Wagenheimer.MsxAudio` is at 1.1.0) and the changelog is in
 [CHANGELOG.md](CHANGELOG.md). **MSXScope** takes its version from the git tag through
 [MinVer](https://github.com/adamralph/minver):
 

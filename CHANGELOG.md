@@ -6,6 +6,8 @@ All notable changes to this package are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-12
+
 ### Added (auto mix, export, transport)
 - **Auto mix profile** (`auto`): the register writes are analysed to find what each channel does (tune,
   bass, arpeggio, pad, drums); each role gets its own level, pan, low cut, tone, saturation, echo and
