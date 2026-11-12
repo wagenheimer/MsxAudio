@@ -64,7 +64,7 @@ public sealed partial class VisualizerGame
 
     // ── Navigation ───────────────────────────────────────────────────────────────
 
-    private bool RomReady => File.Exists(_extractRom) && _extractInfoError is null;
+    private bool RomReady => File.Exists(_extractRom) && _extractInfoError is null && _extractInfo is not null;
 
     private bool MethodReady => _extractMethod == 0 || _omsxPath is not null;
 
@@ -74,10 +74,11 @@ public sealed partial class VisualizerGame
             return;
 
         step = Math.Clamp(step, 0, 2);
+        RefreshExtractInfo();
 
         if (step >= 1 && !RomReady)
         {
-            _extractError = "CHOOSE A ROM FIRST";
+            _extractError = ExtractInfoPending ? "STILL READING THE ROM, ONE MOMENT" : "CHOOSE A ROM FIRST";
             return;
         }
 
@@ -357,6 +358,11 @@ public sealed partial class VisualizerGame
         if (_extractInfoError is not null)
         {
             Text(FitText(_extractInfoError.ToUpperInvariant(), dw - 40), labelX, y + 16, Warn);
+        }
+        else if (ExtractInfoPending)
+        {
+            DrawSpinner(labelX + 6, y + 22, 6);
+            Text("READING THE ROM (SIZE, MAPPER, HASH)...", labelX + 22, y + 18, Dim);
         }
         else
         {
@@ -638,6 +644,10 @@ public sealed partial class VisualizerGame
     /// <summary>A ready-made profile whose ROM hash matches the chosen cartridge, if there is one.</summary>
     private (string Path, RomExtractionProfile Profile)? ReadyProfile()
     {
+        // Until the ROM has been read there is no hash to match: do not remember "no profile" yet.
+        if (_extractInfo is null)
+            return null;
+
         if (_readyProfileFor == _extractRom)
             return _readyProfile;
 

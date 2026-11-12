@@ -22,6 +22,12 @@ All notable changes to this package are documented here. The format follows
   expression (CC11); retriggers within 40 ms are one note and glitches under 40 ms are dropped. A
   pitch written as two bytes at the same instant is read once, so no phantom notes. Options in the
   export dialog.
+- **Remaster polish**: the auto mix now sets its echo from the song's own tempo (a dotted eighth on the
+  left, a quarter on the right; fixed 190/255 ms when no steady tempo is found), widens the stereo
+  image (mid/side) and the live player applies the profile's low cut, high cut and reverb (it used to
+  apply only the panning). Exports can be normalised to **-14 LUFS** (BS.1770 K-weighting with
+  gating; the peak stays under -1 dBFS) so a whole playlist plays at one level (`LoudnessMeter`,
+  `LoudnessNormalizer`).
 - **Transport**: drawn icons, a real stop, previous restarts the song after 3 s, and an AT END choice
   (LOOP / NEXT / STOP).
 
@@ -40,6 +46,10 @@ All notable changes to this package are documented here. The format follows
   ends, ids 1-255, a filter for sparse never-ending tones read past the id table.
 
 ### Fixed
+- Opening the export assistant could stop the music: reading the ROM (unpacking the zip, hashing it,
+  looking it up in the openMSX database) ran on the window thread, the audio device ran dry, and a
+  source that ran dry stayed stopped. The ROM is now read on a worker thread and the player starts a
+  dried-out source again by itself.
 - Clicking a song of a `.msxaudio` pack highlighted the pack's first song.
 - The scan searched Konami (4)'s fixed `0x4000` window in every bank and could pick a routine that
   cannot be called (Penguin Adventure found 6 "sounds"; it now finds 238 entries).

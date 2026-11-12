@@ -102,7 +102,7 @@ public static class VgmTranscriber
 
     // ── Raw notes from the registers ─────────────────────────────────────────────
 
-    private static List<TranscribedNote> Raw(VgmFile vgm)
+    internal static List<TranscribedNote> Raw(VgmFile vgm)
     {
         var psg = new byte[16];
         psg[7] = 0x38;

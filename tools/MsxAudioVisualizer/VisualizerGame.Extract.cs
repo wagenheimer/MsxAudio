@@ -1280,7 +1280,15 @@ public sealed partial class VisualizerGame : Game
             dx + 120, dy + dh - 22, Dim);
     }
 
-    /// <summary>Analyses the chosen ROM once per path (size, SHA-1, mapper, header) for the dialog.</summary>
+    /// <summary>True while the chosen ROM is still being read (the answer is not in yet).</summary>
+    private bool ExtractInfoPending =>
+        _extractInfo is null && _extractInfoError is null && File.Exists(_extractRom);
+
+    /// <summary>
+    /// Analyses the chosen ROM once per path (size, SHA-1, mapper, header) for the dialog. It runs on a
+    /// worker thread: unpacking a zip and looking the hash up in a multi-megabyte database must never
+    /// stall the window (and with it the music).
+    /// </summary>
     private void RefreshExtractInfo()
     {
         if (_extractInfoPath == _extractRom)
@@ -1294,15 +1302,33 @@ public sealed partial class VisualizerGame : Game
         if (!File.Exists(_extractRom))
             return;
 
-        try
+        string path = _extractRom;
+
+        _ = Task.Run(() =>
         {
-            _extractInfo = RomInfo.Analyze(_extractRom);
-            _extractInfoLines = DescribeRom(_extractRom, _extractInfo);
-        }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
-        {
-            _extractInfoError = ex.Message;
-        }
+            RomInfo? info = null;
+            string[] lines = Array.Empty<string>();
+            string? error = null;
+
+            try
+            {
+                info = RomInfo.Analyze(path);
+                lines = DescribeRom(path, info);
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+            {
+                error = ex.Message;
+            }
+
+            // Only if the user has not picked another ROM meanwhile.
+            if (_extractInfoPath == path)
+            {
+                _extractInfoLines = lines;
+                _extractInfoError = error;
+                _extractInfo = info;
+                _readyProfileFor = string.Empty;
+            }
+        });
     }
 
     /// <summary>Opens the extraction output folder in the file manager.</summary>

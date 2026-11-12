@@ -459,6 +459,11 @@ public sealed partial class VisualizerGame : Game
             _player.Render(_render, ChunkFrames);
             SubmitPcm();
         }
+
+        // A stall (a dialog reading a file, a window being dragged) can let the device run dry, and
+        // a source that ran dry stays stopped when more audio is queued: start it again.
+        if (!_paused && _sound.State != SoundState.Playing && _sound.PendingBufferCount > 0)
+            _sound.Play();
     }
 
     /// <summary>Feeds the audition alone while the song is paused (the song position does not move).</summary>

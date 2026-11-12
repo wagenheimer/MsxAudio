@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Wagenheimer.MsxAudio.Export;
 using Wagenheimer.MsxAudio.Vgm;
 
 namespace Wagenheimer.MsxAudio.Mixing;
@@ -75,6 +76,27 @@ public sealed class AutoMixPlan
 {
     /// <summary>Eight channels (3 PSG + 5 SCC).</summary>
     public ChannelMix[] Channels { get; init; } = Array.Empty<ChannelMix>();
+
+    /// <summary>Tempo found in the song (beats per minute); 0 when none was found.</summary>
+    public double Bpm { get; init; }
+
+    /// <summary>True when the notes fall clearly on a beat grid, so the tempo can be trusted.</summary>
+    public bool TempoConfident { get; init; }
+
+    /// <summary>Left echo: a dotted eighth note of the song's tempo (0.19 s when the tempo is unknown).</summary>
+    public double EchoLeftSeconds => TempoConfident ? FitEcho(0.75 * 60.0 / Bpm) : 0.19;
+
+    /// <summary>Right echo: a quarter note of the song's tempo (0.255 s when the tempo is unknown).</summary>
+    public double EchoRightSeconds => TempoConfident ? FitEcho(60.0 / Bpm) : 0.255;
+
+    /// <summary>An echo longer than 0.6 s is a separate sound, not a repeat: halve it until it fits.</summary>
+    private static double FitEcho(double seconds)
+    {
+        while (seconds > 0.6)
+            seconds /= 2;
+
+        return Math.Max(0.12, seconds);
+    }
 
     /// <summary>"BASS PSG1 · LEAD SCC1 · ARP SCC2, SCC3 ..." for the UI.</summary>
     public string Summary
@@ -214,7 +236,12 @@ public static class AutoMixAnalyzer
                 DetectNote(tracks[c], StateOf(c, psg, sccRegs, sccVolume, sccEnable, psgClock), now);
         }
 
-        return Assign(tracks, vgm.TotalSeconds);
+        AutoMixPlan plan = Assign(tracks, vgm.TotalSeconds);
+
+        // The tempo, from where the tune, the bass and the drums start: it sets the echo times.
+        MidiExporter.Tempo tempo = MidiExporter.EstimateTempo(VgmTranscriber.Raw(vgm));
+
+        return new AutoMixPlan { Channels = plan.Channels, Bpm = tempo.Bpm, TempoConfident = tempo.Confident };
     }
 
     internal readonly record struct State(bool Audible, int Volume, double Frequency, bool Tone, bool Noise);
@@ -410,6 +437,7 @@ public sealed class AutoMixProcessor
     private const float DelayFeedback = 0.38f;
     private const float Makeup = 2.6f;
     private const float Ceiling = 0.95f;
+    private const float StereoWidth = 1.18f;       // 1 = as mixed; above 1 widens by boosting the side signal
 
     private readonly AutoMixPlan _plan;
     private readonly int _oversample;
@@ -483,8 +511,8 @@ public sealed class AutoMixProcessor
         _reverb = new StereoReverb(rate);
 
         // A ping-pong echo: the two sides have different lengths, so the repeats walk across the field.
-        _echoL = new float[Math.Max(8, (int)(rate * 0.19))];
-        _echoR = new float[Math.Max(8, (int)(rate * 0.255))];
+        _echoL = new float[Math.Max(8, (int)(rate * plan.EchoLeftSeconds))];
+        _echoR = new float[Math.Max(8, (int)(rate * plan.EchoRightSeconds))];
         _echoDamping = 1f - (float)Math.Exp(-2 * Math.PI * 3500 / rate);
 
         _attack = 1f - (float)Math.Exp(-1.0 / (0.005 * rate));
@@ -595,8 +623,12 @@ public sealed class AutoMixProcessor
             _echoIndexL = (_echoIndexL + 1) % _echoL.Length;
             _echoIndexR = (_echoIndexR + 1) % _echoR.Length;
 
-            float l = _dryL[n] + echoOutL * DelayReturn + _revL[n] * ReverbReturn;
-            float r = _dryR[n] + echoOutR * DelayReturn + _revR[n] * ReverbReturn;
+            // Widen the dry mix (mid/side), then add the echo and the reverb.
+            float mid = (_dryL[n] + _dryR[n]) * 0.5f;
+            float side = (_dryL[n] - _dryR[n]) * 0.5f * StereoWidth;
+
+            float l = mid + side + echoOutL * DelayReturn + _revL[n] * ReverbReturn;
+            float r = mid - side + echoOutR * DelayReturn + _revR[n] * ReverbReturn;
 
             // Bus compressor (3:1 above ~ -9 dB, 5 ms attack, 140 ms release) and a soft limiter.
             float level = Math.Max(Math.Abs(l), Math.Abs(r));

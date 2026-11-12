@@ -41,6 +41,11 @@ public sealed class VgmPlayer : IDisposable
     private readonly float[] _decL;
     private readonly float[] _decR;
 
+    // The profile's output filters and reverb (the other profiles): applied after the decimation.
+    private readonly Biquad? _highPassL, _highPassR, _lowPassL, _lowPassR;
+    private readonly StereoReverb? _reverb;
+    private readonly float _reverbMix;
+
     // Automatic mix (profile "auto"): per-channel treatment by role, with its own effects bus.
     private readonly AutoMixProcessor? _autoMix;
     private readonly float[]? _autoL;
@@ -100,6 +105,27 @@ public sealed class VgmPlayer : IDisposable
         _mixR = new float[capacity];
         _decL = new float[MaxFrames];
         _decR = new float[MaxFrames];
+
+        if (!_profile.AutoMix)
+        {
+            if (_profile.HighPassHz > 0)
+            {
+                _highPassL = Biquad.CreateHighPass(sampleRate, _profile.HighPassHz, 0.707);
+                _highPassR = Biquad.CreateHighPass(sampleRate, _profile.HighPassHz, 0.707);
+            }
+
+            if (_profile.LowPassHz > 0)
+            {
+                _lowPassL = Biquad.CreateLowPass(sampleRate, _profile.LowPassHz, 0.707);
+                _lowPassR = Biquad.CreateLowPass(sampleRate, _profile.LowPassHz, 0.707);
+            }
+
+            if (_profile.ReverbMix > 0)
+            {
+                _reverb = new StereoReverb(sampleRate);
+                _reverbMix = Math.Min(1f, _profile.ReverbMix);
+            }
+        }
 
         if (_profile.AutoMix)
         {
@@ -449,6 +475,30 @@ public sealed class VgmPlayer : IDisposable
 
         // 4) Decimate to the output rate, fill the scopes.
         _decimator.Process(_mixL, _mixR, inCount, _decL, _decR, frames);
+
+        // The profile's filters and reverb: what makes Stereo and Remaster differ from the plain mix.
+        if (_autoMix is null)
+        {
+            if (_highPassL is not null && _highPassR is not null)
+            {
+                for (int i = 0; i < frames; i++)
+                {
+                    _decL[i] = (float)_highPassL.Process(_decL[i]);
+                    _decR[i] = (float)_highPassR.Process(_decR[i]);
+                }
+            }
+
+            if (_lowPassL is not null && _lowPassR is not null)
+            {
+                for (int i = 0; i < frames; i++)
+                {
+                    _decL[i] = (float)_lowPassL.Process(_decL[i]);
+                    _decR[i] = (float)_lowPassR.Process(_decR[i]);
+                }
+            }
+
+            _reverb?.Process(_decL, _decR, frames, _reverbMix);
+        }
 
         // Automatic mix: per-role treatment of the chip channels, added to what the audition made.
         if (_autoMix is not null)

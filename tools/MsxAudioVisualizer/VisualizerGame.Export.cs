@@ -20,6 +20,7 @@ namespace Wagenheimer.MsxAudio.Visualizer;
 public sealed partial class VisualizerGame
 {
     private bool _expWav = true, _expMp3, _expMidi;
+    private bool _expNormalize = true;                       // WAV / MP3 at -14 LUFS
     private bool _expQuantize = true, _expChords = true;     // MIDI: notes on a 16th grid; arpeggios as held chords
     private int _expScope;                              // 0 = this song, 1 = every song in the list
     private int _expLoops = 2;
@@ -41,7 +42,7 @@ public sealed partial class VisualizerGame
 
     private Rectangle _expCloseHit, _expThisHit, _expAllHit, _expWavHit, _expMp3Hit, _expMidiHit, _expFolderHit,
         _expPasteHit, _expOpenHit, _expStartHit, _expCancelHit, _expLoopMinusHit, _expLoopPlusHit,
-        _expFadeMinusHit, _expFadePlusHit, _expQuantizeHit, _expChordsHit;
+        _expFadeMinusHit, _expFadePlusHit, _expQuantizeHit, _expChordsHit, _expNormalizeHit;
     private readonly Rectangle[] _expBitrateHit = new Rectangle[4];
 
     private static readonly int[] Bitrates = { 128, 192, 256, 320 };
@@ -140,6 +141,7 @@ public sealed partial class VisualizerGame
         if (_expWavHit.Contains(p)) { _expWav = !_expWav; return; }
         if (_expMp3Hit.Contains(p)) { _expMp3 = !_expMp3; return; }
         if (_expMidiHit.Contains(p)) { _expMidi = !_expMidi; return; }
+        if (_expNormalizeHit.Contains(p)) { _expNormalize = !_expNormalize; return; }
         if (_expQuantizeHit.Contains(p)) { _expQuantize = !_expQuantize; return; }
         if (_expChordsHit.Contains(p)) { _expChords = !_expChords; return; }
         if (_expLoopMinusHit.Contains(p)) { _expLoops = Math.Max(1, _expLoops - 1); return; }
@@ -233,6 +235,7 @@ public sealed partial class VisualizerGame
         AudioProfile profile = _profile;
         string folder = _expFolder;
         bool wav = _expWav, mp3 = _expMp3, midi = _expMidi;
+        bool normalize = _expNormalize;
         var midiOptions = new MidiOptions { Quantize = _expQuantize, ArpeggiosAsChords = _expChords };
         int loops = _expLoops, fade = _expFade, bitrate = _expBitrate;
 
@@ -266,6 +269,10 @@ public sealed partial class VisualizerGame
                     if (wav || mp3)
                     {
                         RenderedAudio audio = AudioExporter.Render(item.Vgm, profile, 48000, loops, fade);
+
+                        // Every song at the same level, so a playlist does not jump between them.
+                        if (normalize)
+                            audio = LoudnessNormalizer.Normalize(audio, -14.0, 0.89);
 
                         if (wav)
                         {
@@ -361,7 +368,7 @@ public sealed partial class VisualizerGame
         _expCloseHit = _expThisHit = _expAllHit = _expWavHit = _expMp3Hit = _expMidiHit = _expFolderHit =
             _expPasteHit = _expOpenHit = _expStartHit = _expCancelHit = Rectangle.Empty;
         _expLoopMinusHit = _expLoopPlusHit = _expFadeMinusHit = _expFadePlusHit = Rectangle.Empty;
-        _expQuantizeHit = _expChordsHit = Rectangle.Empty;
+        _expQuantizeHit = _expChordsHit = _expNormalizeHit = Rectangle.Empty;
         Array.Fill(_expBitrateHit, Rectangle.Empty);
 
         Panel(dx, dy, dw, dh);
@@ -435,6 +442,9 @@ public sealed partial class VisualizerGame
             _expBitrateHit[i] = new Rectangle(fieldX + i * 74, y, 68, 18);
             DrawButton(_expBitrateHit[i], Bitrates[i] + " KBPS", _expBitrate == Bitrates[i], _expMp3 ? Accent : Dim);
         }
+
+        _expNormalizeHit = new Rectangle(fieldX + 4 * 74 + 12, y, 230, 18);
+        DrawButton(_expNormalizeHit, "SAME LOUDNESS: -14 LUFS", _expNormalize, Accent);
 
         // Where.
         y += 32;
