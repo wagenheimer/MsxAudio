@@ -43,8 +43,17 @@ public sealed class RomExtractionProfile
     /// <summary>openMSX machine (e.g. <c>C-BIOS_MSX2_JP</c>).</summary>
     public string Machine { get; set; } = "C-BIOS_MSX2_JP";
 
-    /// <summary>Cartridge type (optional; e.g. <c>KonamiSCC</c>).</summary>
+    /// <summary>Cartridge type (optional; e.g. <c>KonamiSCC</c>). Empty = detect from the ROM.</summary>
     public string? RomType { get; set; }
+
+    /// <summary>Video refresh rate: 60 (NTSC, default) or 50 (PAL). It sets the tempo of every capture.</summary>
+    public double RefreshRate { get; set; } = 60;
+
+    /// <summary>How the sound routine takes its id: <c>A</c> (default), <c>HL</c>, <c>DE</c> or <c>BC</c>.</summary>
+    public string IdRegister { get; set; } = "A";
+
+    /// <summary>ROM bank the sound routine lives in (-1 = whatever is mapped after boot).</summary>
+    public int SoundCallBank { get; set; } = -1;
 
     /// <summary>Address of the "play sound A" routine (CPU).</summary>
     public int SoundCallAddress { get; set; } = 0x432E;

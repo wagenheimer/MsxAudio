@@ -6,14 +6,35 @@ All notable changes to this package are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Konami (4) mapper** used the SCC cartridge's bank registers, so it never switched banks. It now
+  uses `0x6000`/`0x8000`/`0xA000` with bank 0 fixed. This is what left Penguin Adventure silent.
+- **SCC window** was always visible: reading `0x9800` returned `0xFF` even when that bank held ROM
+  data. It now answers only while bank register `0x9000` holds `0x3F`.
+- **Keyboard** was read through port `0xA8` (the slot register). The row is now selected on `0xAA`.
+- The sound scan truncated its candidates by address (not by relevance), assumed a linear ROM and
+  only tried `A` as the id register.
+
 ### Added
+- **In-process MSX machine**: primary slots with 64 KB of RAM, `ENASLT`/`RSLREG`/`WSLREG`/`RDSLT`/
+  `WRSLT`/`CALSLT`, the PPI, PSG read-back, joystick port select, `GICINI`, `GTSTCK`, `GTTRIG`,
+  `RDVDP`, the BIOS key state (`NEWKEY`, `TRGFLG`), `HALT` waiting for vblank, page-2 cartridges and
+  `R-Type`; **T-state timestamps** on every captured write; **50 Hz (PAL)** support.
+- **Mapper detection** like openMSX: SHA-1 lookup in `softwaredb.xml` (when found) and the
+  `LD (nn),A` vote heuristic; `RomInfo`, `rom-info` command and a **DETECTED** line in the player.
+- **Diagnosis**: a silent capture or scan now says why (missing header, unsupported MSX-MUSIC /
+  MSX-AUDIO / SCC+ writes, BIOS services that are stubs).
+- **Smarter scan**: candidates ranked by callers and searched in every ROM bank, the id passed in
+  `A`/`HL`/`DE`/`BC`, probing by *distinct* sounds against the game idling, an ambiguity warning.
+  King's Valley 1's `setMusic` is now found without a profile.
+- Capture: **auto-press** (`--auto 1`), `--refresh 50|60`; profiles gain `refreshRate`,
+  `idRegister` and `soundCallBank`. The dialog gets the matching 50/60 Hz and AUTO-PRESS chips.
 - `extract-direct`: runs the cartridge's sound driver **in process** (minimal MSX1 machine with a
   Z80 core, Konami SCC mapper, 16 KB RAM, PSG/SCC capture and BIOS stubs for `RST 30h`, `WRTPSG`
-  and `RDPSG`). Experimental: the VDP vblank flag is not modelled yet, so the driver runs ~6% off
-  the hardware tempo and loop detection fails.
+  and `RDPSG`).
 - `probe` CLI command: boots a ROM in the built-in machine and dumps the interrupt hook state.
-- Tests for the built-in machine, VGM writer round-trip, WAV decoding, loudness end detection and
-  library lookups.
+- Tests for the built-in machine (mappers, slots, PPI, timing, detection, scan), VGM writer
+  round-trip, WAV decoding, loudness end detection and library lookups.
 
 ## [1.0.0] - 2026-11-11
 

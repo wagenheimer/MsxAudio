@@ -16,7 +16,7 @@ namespace Wagenheimer.MsxAudio.Extraction;
 /// </remarks>
 public static class RomFile
 {
-    private static readonly string[] RomExtensions = { ".rom", ".mx1", ".mx2", ".ri", ".bin" };
+    private static readonly string[] RomExtensions = { ".rom", ".mx1", ".mx2", ".ri", ".msx", ".bin" };
 
     /// <summary>
     /// Returns a path to a readable ROM file. A <c>.zip</c> is unpacked (once) into a cache folder and
@@ -67,6 +67,7 @@ public static class RomFile
     public static string? FindCartridge(string zipPath)
     {
         using var archive = ZipFile.OpenRead(zipPath);
+        string? fallback = null;
 
         foreach (ZipArchiveEntry entry in archive.Entries)
         {
@@ -79,9 +80,13 @@ public static class RomFile
             string extension = Path.GetExtension(entry.FullName);
             if (Array.Exists(RomExtensions, e => e.Equals(extension, StringComparison.OrdinalIgnoreCase)))
                 return entry.FullName;
+
+            // No known extension: remember the first entry that is the size of a cartridge (16 KB - 2 MB).
+            if (fallback is null && entry.Length is >= 0x4000 and <= 0x200000)
+                fallback = entry.FullName;
         }
 
-        return null;
+        return fallback;
     }
 
     /// <summary>True when <paramref name="path"/> is an archive this class can unpack.</summary>

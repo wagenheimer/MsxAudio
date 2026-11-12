@@ -33,6 +33,7 @@ public sealed partial class VisualizerGame : Game
         ("KONAMI SCC", RomMapper.KonamiScc),
         ("ASCII8", RomMapper.Ascii8),
         ("ASCII16", RomMapper.Ascii16),
+        ("R-TYPE", RomMapper.RType),
     };
 
     private enum ExtractMode { Capture, Profile }
@@ -52,6 +53,12 @@ public sealed partial class VisualizerGame : Game
     private int _extractFormat;                     // 0 = .vgm, 1 = .msxaudio (capture only)
     private bool _extractPsg = true;
     private bool _extractScc = true;
+    private bool _extractPal;                       // 50 Hz instead of 60 Hz
+    private bool _extractAutoPress;                 // tap fire/space so the game leaves its menus
+
+    private RomInfo? _extractInfo;                  // what the ROM turned out to be (shown under the path)
+    private string _extractInfoPath = string.Empty;
+    private string? _extractInfoError;
 
     private bool _extractRunning;
     private CancellationTokenSource? _extractCts;
@@ -67,7 +74,7 @@ public sealed partial class VisualizerGame : Game
     private Rectangle _exRomHit, _exBrowseHit, _exMapperHit, _exKeysHit, _exProfileHit, _exProfileBrowseHit;
     private Rectangle _exOutHit, _exOutBrowseHit, _exFmtVgmHit, _exFmtPkgHit, _exPsgHit, _exSccHit;
     private Rectangle _exMinusHit, _exPlusHit, _exStartHit, _exScanHit, _exCloseHit;
-    private Rectangle _exModeCaptureHit, _exModeProfileHit;
+    private Rectangle _exModeCaptureHit, _exModeProfileHit, _exHzHit, _exAutoHit;
     private Rectangle _extractButtonHit;      // header chip
 
     /// <summary>Opens the extraction dialog (F3 or the header chip).</summary>
@@ -91,6 +98,9 @@ public sealed partial class VisualizerGame : Game
 
         if (int.TryParse(Environment.GetEnvironmentVariable("MSXAUDIO_ROM_SECONDS"), out int seconds))
             _extractSeconds = Math.Clamp(seconds, 5, 600);
+
+        _extractPal = Environment.GetEnvironmentVariable("MSXAUDIO_ROM_PAL") == "1";
+        _extractAutoPress = Environment.GetEnvironmentVariable("MSXAUDIO_ROM_AUTOPRESS") == "1";
 
         if (Environment.GetEnvironmentVariable("MSXAUDIO_ROM_PROFILE") is { Length: > 0 } profile)
         {
@@ -243,6 +253,8 @@ public sealed partial class VisualizerGame : Game
         bool psg = _extractPsg;
         bool scc = _extractScc;
         bool package = _extractFormat == 1;
+        bool pal = _extractPal;
+        bool autoPress = _extractAutoPress;
         ExtractMode mode = _extractMode;
 
         _extractError = null;
@@ -274,12 +286,15 @@ public sealed partial class VisualizerGame : Game
         {
             try
             {
+                double refresh = pal ? 50 : 60;
+
                 if (scan)
-                    return RunScanJob(rom, mapperIndex, profilePath, psg, scc, token, output);
+                    return RunScanJob(rom, mapperIndex, profilePath, psg, scc, refresh, token, output);
 
                 return mode == ExtractMode.Profile
-                    ? RunProfileJob(rom, profilePath, psg, scc, token, output)
-                    : RunCaptureJob(rom, mapperIndex, keys, seconds, package, psg, scc, token, output);
+                    ? RunProfileJob(rom, profilePath, psg, scc, refresh, token, output)
+                    : RunCaptureJob(rom, mapperIndex, keys, seconds, package, psg, scc, refresh, autoPress,
+                        token, output);
             }
             catch (OperationCanceledException)
             {
@@ -295,7 +310,7 @@ public sealed partial class VisualizerGame : Game
 
     /// <summary>Boot + key script: whatever the cartridge plays in that window.</summary>
     private string? RunCaptureJob(string rom, int mapperIndex, string keys, int seconds, bool package,
-        bool psg, bool scc, CancellationToken token, string output)
+        bool psg, bool scc, double refresh, bool autoPress, CancellationToken token, string output)
     {
         var options = new RomCaptureOptions
         {
@@ -304,11 +319,13 @@ public sealed partial class VisualizerGame : Game
             Seconds = seconds,
             CapturePsg = psg,
             CaptureScc = scc,
+            RefreshRate = refresh,
+            AutoPlay = autoPress,
         };
 
         options.Keys.AddRange(KeyPress.ParseScript(keys));
 
-        int frames = Math.Max(1, seconds * 60);
+        int frames = Math.Max(1, (int)(seconds * refresh));
         _extractTotalFrames = frames;
 
         var result = RomCapture.Run(
@@ -336,7 +353,9 @@ public sealed partial class VisualizerGame : Game
 
         if (result.NoteWrites < 20)
         {
-            _extractError = "NO MUSIC CAPTURED — TRY A LONGER CAPTURE OR ADD KEYS";
+            _extractError = result.Diagnosis.Count > 0
+                ? "NO MUSIC CAPTURED: " + result.Diagnosis[0].ToUpperInvariant()
+                : "NO MUSIC CAPTURED — TRY A LONGER CAPTURE, KEYS OR AUTO-PRESS";
             return null;
         }
 
@@ -344,10 +363,13 @@ public sealed partial class VisualizerGame : Game
     }
 
     /// <summary>Curated profile: every id, with the profile's names and durations.</summary>
-    private string? RunProfileJob(string rom, string profilePath, bool psg, bool scc,
+    private string? RunProfileJob(string rom, string profilePath, bool psg, bool scc, double refresh,
         CancellationToken token, string output)
     {
         RomExtractionProfile profile = RomExtractionProfiles.Load(profilePath);
+        if (refresh < 60)
+            profile.RefreshRate = refresh;
+
         AddExtractLog($"profile {profile.Name} ({profile.Ids.Count} id(s))");
 
         _extractTotalFrames = Math.Max(1, profile.Ids.Count);
@@ -373,7 +395,7 @@ public sealed partial class VisualizerGame : Game
 
     /// <summary>No profile: probe the driver's ids and keep what makes sound.</summary>
     private string? RunScanJob(string rom, int mapperIndex, string profilePath, bool psg, bool scc,
-        CancellationToken token, string output)
+        double refresh, CancellationToken token, string output)
     {
         RomExtractionProfile? profile = profilePath.Length > 0 && File.Exists(profilePath)
             ? RomExtractionProfiles.Load(profilePath)
@@ -398,6 +420,8 @@ public sealed partial class VisualizerGame : Game
             RomPath = rom,
             Mapper = ExtractMappers[mapperIndex].Mapper,
             SoundCallAddress = profile?.SoundCallAddress ?? 0,
+            SoundCallBank = profile?.SoundCallBank ?? -1,
+            RefreshRate = refresh,
             PlayerAddress = profile?.PlayerAddress ?? 0,
             IdMask = profile?.IdMask ?? 0,
             StopId = profile?.StopId ?? 0,
@@ -427,7 +451,12 @@ public sealed partial class VisualizerGame : Game
 
         if (result.Songs.Count == 0)
         {
-            _extractError = "NO SOUND FOUND — TRY A PROFILE OR THE CAPTURE MODE";
+            foreach (string line in result.Diagnosis)
+                AddExtractLog("why: " + line);
+
+            _extractError = result.Diagnosis.Count > 0
+                ? "NO SOUND FOUND: " + result.Diagnosis[0].ToUpperInvariant()
+                : "NO SOUND FOUND — TRY A PROFILE OR THE CAPTURE MODE";
             return null;
         }
 
@@ -706,6 +735,18 @@ public sealed partial class VisualizerGame : Game
             return;
         }
 
+        if (_exHzHit.Contains(p) && !_extractRunning)
+        {
+            _extractPal = !_extractPal;
+            return;
+        }
+
+        if (_exAutoHit.Contains(p) && !_extractRunning)
+        {
+            _extractAutoPress = !_extractAutoPress;
+            return;
+        }
+
         if (_exMapperHit.Contains(p) && !_extractRunning)
         {
             _extractMapper = (_extractMapper + 1) % ExtractMappers.Length;
@@ -797,14 +838,21 @@ public sealed partial class VisualizerGame : Game
         _exBrowseHit = new Rectangle(fieldX + fieldW + 8, dy + 38, 84, 18);
         DrawButton(_exBrowseHit, "BROWSE", false, Accent);
 
+        // What the ROM is (size, mapper, where the mapper came from, header): refreshed on path changes.
+        RefreshExtractInfo();
+        string detected = _extractInfoError ?? _extractInfo?.Summary ?? string.Empty;
+        if (detected.Length > 0)
+            Text(FitText("DETECTED: " + detected.ToUpperInvariant(), fieldW), fieldX, dy + 60,
+                _extractInfoError is null ? Dim : Warn);
+
         // Mode: capture (any ROM) or profile (curated song list).
-        Text("MODE", labelX, dy + 72, Dim);
+        Text("MODE", labelX, dy + 76, Dim);
         bool capture = _extractMode == ExtractMode.Capture;
 
-        _exModeCaptureHit = new Rectangle(fieldX, dy + 66, 92, 18);
+        _exModeCaptureHit = new Rectangle(fieldX, dy + 70, 92, 18);
         DrawButton(_exModeCaptureHit, "CAPTURE", capture, Accent);
 
-        _exModeProfileHit = new Rectangle(fieldX + 96, dy + 66, 92, 18);
+        _exModeProfileHit = new Rectangle(fieldX + 96, dy + 70, 92, 18);
         DrawButton(_exModeProfileHit, "PROFILE", !capture, Accent);
 
         if (!capture)
@@ -812,12 +860,12 @@ public sealed partial class VisualizerGame : Game
             int profileX = fieldX + 96 + 92 + 10;
             int profileW = dx + dw - 116 - profileX;
 
-            _exProfileHit = new Rectangle(profileX, dy + 66, profileW, 18);
+            _exProfileHit = new Rectangle(profileX, dy + 70, profileW, 18);
             DrawField(_exProfileHit,
                 _extractProfile.Length > 0 ? Path.GetFileName(_extractProfile) : "(NO PROFILE CHOSEN)",
                 _extractField == 2, _extractProfile.Length > 0 ? null : Dim);
 
-            _exProfileBrowseHit = new Rectangle(profileX + profileW + 8, dy + 66, 84, 18);
+            _exProfileBrowseHit = new Rectangle(profileX + profileW + 8, dy + 70, 84, 18);
             DrawButton(_exProfileBrowseHit, "BROWSE", false, Accent);
         }
         else
@@ -841,6 +889,14 @@ public sealed partial class VisualizerGame : Game
 
         _exPlusHit = new Rectangle(secondsX + 124, dy + 94, 18, 18);
         DrawButton(_exPlusHit, "+", false, Dim);
+
+        // 60 Hz (NTSC) or 50 Hz (PAL): the tempo of the whole capture. Auto-press: tap fire and the
+        // space bar every few seconds so the game leaves its title/menu screens by itself.
+        _exHzHit = new Rectangle(secondsX + 160, dy + 94, 58, 18);
+        DrawButton(_exHzHit, _extractPal ? "50 HZ" : "60 HZ", true, Accent);
+
+        _exAutoHit = new Rectangle(secondsX + 224, dy + 94, 118, 18);
+        DrawButton(_exAutoHit, "AUTO-PRESS", _extractAutoPress && capture, capture ? Accent : Dim);
 
         // Capture: key script. Profile: what the profile holds.
         if (capture)
@@ -961,6 +1017,29 @@ public sealed partial class VisualizerGame : Game
 
         Text("ENTER RUNS · ESC CANCELS · THE RESULT GOES TO THE OUTPUT FOLDER AND OPENS HERE",
             dx + 16, dy + dh - 22, Dim);
+    }
+
+    /// <summary>Analyses the chosen ROM once per path (size, SHA-1, mapper, header) for the dialog.</summary>
+    private void RefreshExtractInfo()
+    {
+        if (_extractInfoPath == _extractRom)
+            return;
+
+        _extractInfoPath = _extractRom;
+        _extractInfo = null;
+        _extractInfoError = null;
+
+        if (!File.Exists(_extractRom))
+            return;
+
+        try
+        {
+            _extractInfo = RomInfo.Analyze(_extractRom);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+        {
+            _extractInfoError = ex.Message;
+        }
     }
 
     /// <summary>File name the current mode will produce (shown under the output row).</summary>

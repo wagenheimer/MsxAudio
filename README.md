@@ -2,8 +2,9 @@
 
 <img src="docs/media/icon.png" alt="MSXScope" width="112" align="right">
 
-**MSX audio for .NET** — AY-3-8910 (PSG) and Konami SCC emulation, VGM playback/recording, ROM music
-extraction and a game-ready streaming engine with its own `.msxaudio` library format.
+**MSX audio for .NET** — AY-3-8910 (PSG) and Konami SCC emulation, VGM playback/recording, **ROM music
+extraction** (an in-process MSX that runs a cartridge's own sound driver) and a game-ready streaming
+engine with its own `.msxaudio` library format.
 
 **MSXScope** — the visual player included in the repo: VGM playback with per-channel PSG/SCC strips,
 spectrum in dB, piano roll with a whole-song map, a playable piano that auditions the song's own
@@ -39,7 +40,8 @@ dotnet add package Wagenheimer.MsxAudio.MonoGame  # optional MonoGame bridge
 - [Screens](#screens)
 - [The `.msxaudio` format](#the-msxaudio-format)
 - [Playback engine](#playback-engine)
-- [Extracting music from a ROM](#extracting-music-from-a-rom)- [CLI](#cli)
+- [Extracting music from a ROM](#extracting-music-from-a-rom)
+- [CLI](#cli)
 - [Mixing profiles](#mixing-profiles)
 - [Validation](#validation)
 - [Architecture](#architecture)
@@ -79,7 +81,7 @@ MSX clocks: PSG **1,789,772.5 Hz** (divide by 16) and SCC **1,789,772.5 Hz** in 
 | :--- | :--- |
 | .NET | **10** (`net10.0`) |
 | MonoGame (only for the bridge and the visualizer) | 3.8 (`MonoGame.Framework.DesktopGL`) |
-| openMSX (only for ROM extraction) | 19+ (portable build works) |
+| openMSX (optional: reference extraction path, and its `softwaredb.xml` for mapper detection) | 19+ (portable build works) |
 
 The core has **no engine dependency** and targets `net10.0` with nullable enabled.
 
@@ -179,10 +181,12 @@ In the **piano** view:
 | <img src="docs/media/piano.png" width="100%"> | <img src="docs/media/folder-browser.png" width="100%"> |
 | **Mixing profiles** | **Help** (with the build version) |
 | <img src="docs/media/profiles.png" width="100%"> | <img src="docs/media/help.png" width="100%"> |
-| **Extract from ROM** (any cartridge, no profile) | **Profile mode** (full song list, named) |
+| **Extract from ROM** (DETECTED line, 50/60 Hz, auto-press) | **Profile mode** (full song list, named) |
 | <img src="docs/media/extract.png" width="100%"> | <img src="docs/media/extract-profile.png" width="100%"> |
-| **Cartridge picker** (`*.rom`, breadcrumb) | **A `.msxaudio` package in the playlist** |
-| <img src="docs/media/rom-picker.png" width="100%"> | <img src="docs/media/extract-result.png" width="100%"> |
+| **Cartridge picker** (`*.rom`/`.zip`, breadcrumb) | **FIND ALL SONGS** (progress and log) |
+| <img src="docs/media/rom-picker.png" width="100%"> | <img src="docs/media/extract-scan.png" width="100%"> |
+| **A `.msxaudio` package in the playlist** | |
+| <img src="docs/media/extract-result.png" width="100%"> | |
 
 What you see:
 
@@ -287,97 +291,52 @@ There is **no standard music format on MSX**: each game ships its own driver, an
 exists while that driver runs. So nothing here "decodes" a file — the cartridge's driver is executed
 on a minimal MSX machine and its PSG/SCC writes are recorded.
 
-> **Deep dive:** [`docs/EXTRACTION.md`](docs/EXTRACTION.md) — the machine, the three modes (capture /
-> scan / profile), what works per game and the known limits.
+> **Deep dive:** [`docs/EXTRACTION.md`](docs/EXTRACTION.md) — the machine, the mappers and how one is
+> chosen, the three modes, the diagnosis report, what works per game and the known limits.
 
-The extractor drives **openMSX** (the emulator does the hard part: VDP, CPU, mapper, SCC) and injects
-`CALL <sound routine>` with each id, recording the VGM. What changes from game to game lives in a
-**JSON profile** (how to reach a silent screen, the routine address and the ids) — no recompiling.
+The machine (`MiniMsx`) models what drivers touch: primary slots and 64 KB of RAM, the Konami / Konami
+SCC / ASCII8 / ASCII16 / R-Type mappers, the PPI (slot register, keyboard, joystick), the PSG with its
+read-back, the VDP vblank, the BIOS entries games call, and **T-state timestamps** on every recorded
+write, at 60 Hz or 50 Hz. The mapper is looked up by SHA-1 in an openMSX `softwaredb.xml` when one is
+found and guessed with openMSX's own rules otherwise.
 
-```bash
-MsxAudioTool extract "King's Valley II (JP)[RC-760].rom" kingsvalley.msxaudio \
-    --profile profiles/kingsvalley2.json --openmsx tools/omsx/openmsx.exe
-```
+### From the player
 
-`profiles/kingsvalley2.json` (a real example, Konami 1988):
-
-```json
-{
-  "name": "King's Valley II",
-  "machine": "C-BIOS_MSX2_JP",
-  "soundCallAddress": 17198,
-  "stopId": 1,
-  "ids": [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30],
-  "musicIds": [3,5,6,7,8,9,10,13,14,17,18],
-  "secondsPerId": 12,
-  "secondsPerSong": 120,
-  "secondsById": { "9": 300 },
-  "firstCaptureAt": 23,
-  "navigation": [
-    { "at": 12, "row": 8, "mask": 1 },
-    { "at": 16, "row": 8, "mask": 1 },
-    { "at": 19, "row": 8, "mask": 64 },
-    { "at": 20.5, "row": 8, "mask": 1 }
-  ]
-}
-```
-
-> Songs with long loops need longer captures (KV2's `stage_e` only reveals its 67.287 s loop with
-> 300 s of recording). Use `secondsById` for that.
-
-### Direct extraction, no external emulator
-
-`extract-direct` runs the **cartridge's own sound driver in process**: a minimal MSX machine (Z80
-core + mapper + 16 KB RAM + PSG/SCC capture + keyboard/joystick + VDP vblank/status + BIOS entry
-stubs for `RST 30h`, `WRTPSG`, `RDPSG` and `SNSMAT`) boots the ROM and records the register writes —
-no openMSX, no window.
-
-Cartridges are supported through **mappers**: auto by size (up to 32 KB linear, larger Konami SCC) or
-explicit `--mapper linear | konami | konami-scc | ascii8 | ascii16` (16 KB to 1 MB).
-
-```bash
-# full song list, using a curated profile (sound routine + ids + names)
-MsxAudioTool extract-direct "rom.msx" game.msxaudio --profile profiles/kingsvalley2.json
-
-# whatever the game plays: boot it, send buttons, record
-MsxAudioTool capture "rom.msx" gameplay.vgm --seconds 30 --keys "START@1"
-MsxAudioTool capture "rom.msx" title.vgm    --seconds 20                    # nothing pressed
-
-# boot diagnostics: mapper, hooks, keyboard/joystick, hot addresses of the hook
-MsxAudioTool probe "rom.msx" --mapper konami-scc
-```
-
-The same capture runs **from the player**: `F3` (or the **EXTRACT FROM ROM** chip in the header)
-opens a dialog where you pick the cartridge (its own `.rom` browser), the mapper, how long to record
-and the button script. The result is written next to the ROM as `<rom>_capture.vgm` and loaded
-straight into the player — no profile, no emulator, no CLI.
-
-The dialog has **three ways** to get music out, from the most generic to the most complete:
+`F3` (or the **EXTRACT FROM ROM** chip) opens the dialog: pick a `.rom` or the `.zip` as downloaded
+(its own browser), check the **DETECTED** line (size, mapper and where it came from, header), choose
+60/50 Hz and whether to **AUTO-PRESS** the fire button and space bar, and pick a mode:
 
 | Mode | What it does | When to use |
 | :--- | :--- | :--- |
 | **CAPTURE** | boots the ROM and records what it plays after the key script | any cartridge; grabs a title theme or a gameplay window |
 | **PROFILE** | reads a `.json` with the driver's addresses, ids and names | the full song list, with names (see `profiles/`) |
-| **FIND ALL SONGS** | probes the ids the driver accepts and keeps what makes sound | no profile yet: gives you a first list named `id_NN` |
+| **FIND ALL SONGS** | finds the "play sound" routine (in any ROM bank, with the id in `A`/`HL`/`DE`/`BC`), then probes every id | no profile yet: a first list named `id_NN` |
 
-The **FIND ALL SONGS** mode also works from the CLI:
+The result is written to `<rom folder>/extracted_audio/<rom name>` and opens straight in the player.
+When nothing plays, the log says **why** (missing header, a chip that is not emulated, a BIOS service
+the game kept calling) instead of leaving you with a silent file.
+
+### From the CLI
 
 ```bash
-# with a profile: uses its driver addresses and its id range
-MsxAudioTool scan kv1.rom kv1_songs.msxaudio --profile profiles/kingsvalley1.json
+# what is this ROM? (size, SHA-1, mapper and its source, header)
+MsxAudioTool rom-info "rom.zip"
 
-# without one: probes the routines that write to the PSG/SCC, then every id
+# whatever the game plays: boot it, send buttons, record
+MsxAudioTool capture "rom.zip" title.vgm --seconds 30 --keys "START@1"
+MsxAudioTool capture "rom.zip" title.vgm --seconds 40 --auto 1            # tap fire/space by itself
+MsxAudioTool capture "rom.zip" title.vgm --seconds 40 --refresh 50        # a PAL game
+
+# find every sound id, no profile needed
 MsxAudioTool scan game.rom game_songs.msxaudio --seconds 12
+MsxAudioTool scan game.rom game_songs.msxaudio --call 0x432E --bank 0 --id-reg A
+
+# full named list from a curated profile
+MsxAudioTool extract-direct "rom.msx" game.msxaudio --profile profiles/kingsvalley2.json
+
+# boot diagnostics: mapper, hooks, hot addresses, and what the game needed that is missing
+MsxAudioTool probe "rom.msx"
 ```
-
-Ids come out as `id_NN`; music is told from effects by looking for a loop (or by the sound still
-filling the capture), duplicate streams are dropped, and the result is a `.msxaudio` you can open in
-the player and rename.
-
-| Game | Scan result |
-| :--- | :--- |
-| King's Valley 1 (16 KB, PSG) | 24 sounds in the id range 1–31 (8 songs + 8 effects when labelled by the profile) |
-| King's Valley II (128 KB, Konami SCC) | 65 sounds, 5 duplicate ids dropped |
 
 | Key script | Meaning |
 | :--- | :--- |
@@ -387,43 +346,50 @@ the player and rename.
 | `UP` / `DOWN` / `LEFT` / `RIGHT` | joystick directions (`@seconds` optional, default 1 s) |
 | `8:1@2` | raw matrix: keyboard **row 8, bit 1**, two seconds after boot |
 
-Status: King's Valley II works through its profile (interrupt-driven driver, ~97k writes in 100 s,
-audio renders) and also records straight from the capture dialog (13.4k writes, 5.7k of them pitch,
-in 15 s). **King's Valley 1 (16 KB, PSG only) now works end to end without a profile**: it boots,
-the joystick trigger starts the game, and the capture contains its music (verified: 394 pitch writes
-in 30 s, notes visible in the piano roll). Two bugs made this possible: the boot skipped `H.STKE`, and
-the hook used to be *restarted* when a frame overran the instruction budget instead of continuing —
-KV1 sets a re-entry guard in its handler, so restarting it left the game frozen at the title.
-`extract` (openMSX) remains the bit-exact reference.
+### Profiles
 
-#### Running only the sound driver (King's Valley 1)
+A profile (`profiles/*.json`) names the driver's addresses so a game can be extracted completely, with
+names and durations. `profiles/kingsvalley2.json` (Konami, 1988):
 
-Some cartridges run their **whole game inside the interrupt handler**, so stepping the game makes it
-replace whatever song the extractor started. For those, a profile can name the **per-frame sound
-player** (`playerAddress`): the extractor then runs *only the driver* — no game logic at all.
-
-```bash
-MsxAudioTool extract-direct kv1.rom kingsvalley1.msxaudio --profile profiles/kingsvalley1.json
-# ingame       id 11   90,00s  13512 writes  loop 0,000s + 12,800s
-# start_game   id 23   40,00s   3039 writes  loop 4,683s + 0,833s
-# ... 8 songs + 8 effects
+```json
+{
+  "name": "King's Valley II",
+  "soundCallAddress": 17198,
+  "stopId": 1,
+  "ids": [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20],
+  "musicIds": [3,5,6,7,8,9,10,13,14,17,18],
+  "secondsPerId": 12,
+  "secondsPerSong": 120,
+  "secondsById": { "9": 300 }
+}
 ```
 
-`profiles/kingsvalley1.json` is documented from the annotated disassembly
-([GuillianSeed/Kings-Valley](https://github.com/GuillianSeed/Kings-Valley)):
+Other fields: `soundCallBank`, `idRegister` (`A`/`HL`/`DE`/`BC`), `playerAddress` (run **only the sound
+driver**, for games whose interrupt handler also runs the whole game, like King's Valley 1),
+`resetAddresses`, `idMask`, `romType` and `refreshRate` — all documented in
+[`docs/EXTRACTION.md`](docs/EXTRACTION.md). Songs with long loops need longer captures (use
+`secondsById`).
 
-| Field | King's Valley 1 |
-| :--- | :--- |
-| `soundCallAddress` | `0x7AA9` — `setMusic`: the id goes in `A`, `0x80` = music stream (hence `idMask: 128`) |
-| `playerAddress` | `0x7B36` — per-frame player, callable on its own |
-| `resetAddresses` | `0xE012`, `0xE01E`, `0xE02C` — each channel's current-song byte (the driver ignores a song with a higher id, so they must be cleared) |
-| ids | `11` = in-game BGM (2 channels), `17/20/23/26/29` = 3 channels, `3…10` = effects |
+### Status per game
 
-The in-game theme comes out as a **12.8 s loop** with a constant level (RMS 0.040 across the whole
-loop), which is what the player shows in the screenshot above.
+| Game | Cartridge | Result |
+| :--- | :--- | :--- |
+| King's Valley 1 | 16 KB, linear, PSG | capture ✅ · profile: **8 songs + 8 effects** ✅ · scan finds `setMusic` by itself (29 sounds) ✅ |
+| King's Valley II | 128 KB, Konami SCC | capture ✅ (5.9k pitch writes in 15 s) · profile: full named list ✅ |
+| Penguin Adventure | 128 KB, Konami (4), PSG | capture ✅ — music now recorded (it was silent before the Konami-mapper fix) |
 
-Packages are first-class in the player now: dropping a `.msxaudio` on the window (or opening it from
-the folder browser) lists every song by name, one playlist row each.
+Games whose music is on **MSX-MUSIC, MSX-AUDIO, SCC+ or MoonSound** are detected and reported, not
+recorded yet. The openMSX path (`MsxAudioTool extract`) remains the bit-exact reference for those.
+
+### With openMSX (reference path)
+
+The same extraction can drive **openMSX** (the emulator does the VDP, CPU, mapper and every chip) and
+inject `CALL <sound routine>` with each id, recording the VGM with its `vgm_rec`:
+
+```bash
+MsxAudioTool extract "King's Valley II (JP)[RC-760].rom" kingsvalley.msxaudio \
+    --profile profiles/kingsvalley2.json --openmsx tools/omsx/openmsx.exe
+```
 
 ## CLI
 
@@ -432,9 +398,11 @@ MsxAudioTool import <vgm-folder> <out.msxaudio> [--title T] [--clips]
 MsxAudioTool info <package.msxaudio>
 MsxAudioTool extract <rom> <out.msxaudio> --profile profile.json [--openmsx path]
 MsxAudioTool extract-direct <rom> <out.msxaudio> --profile profile.json
-MsxAudioTool capture <rom> <out.vgm> [--seconds N] [--mapper M] [--keys "START@1,RIGHT@3"]
-MsxAudioTool scan <rom> <out.msxaudio> [--ids 1-63] [--call ADDR] [--player ADDR] [--profile p.json]
-MsxAudioTool probe <rom> [--mapper M]
+MsxAudioTool capture <rom> <out.vgm> [--seconds N] [--mapper M] [--keys "START@1,RIGHT@3"] [--auto 1] [--refresh 50|60]
+MsxAudioTool scan <rom> <out.msxaudio> [--ids 1-63] [--call ADDR] [--bank N] [--id-reg A|HL|DE|BC]
+                  [--player ADDR] [--profile p.json] [--refresh 50|60]
+MsxAudioTool probe <rom> [--mapper M] [--refresh 50|60]
+MsxAudioTool rom-info <rom>
 MsxAudioTool render <package.msxaudio> <id|all> <out.wav> [--profile original|stereo|remaster]
 MsxAudioTool verify <vgm> <capture.wav>
 MsxAudioTool unpack <package.msxaudio> <folder>
@@ -474,7 +442,8 @@ src/Wagenheimer.MsxAudio/             core (pure C#, no engine dependency)
   Mixing/      AudioProfile, MsxSoundRenderer, FirDecimator, Biquad, StereoReverb
   Songs/       MsxAudioLibrary (.msxaudio)
   Playback/    MsxAudioEngine, WavDecoder
-  Extraction/  VgmImporter, OpenMsxRomExtractor, DirectRomExtractor (+ profiles)
+  Extraction/  MiniMsx (the machine), RomMapper, RomInfo (+ softwaredb), RomCapture, RomSoundScan,
+               DirectRomExtractor (+ profiles), OpenMsxRomExtractor, VgmImporter
 src/Wagenheimer.MsxAudio.MonoGame/    MsxAudioPlayer (DynamicSoundEffectInstance)
 tools/MsxAudioTool/                   extractor/import/export CLI
 tools/MsxAudioVisualizer/             MSXScope: MonoGame visual player (PSG/SCC, GIF/MP4 export)
@@ -508,16 +477,17 @@ version file.
 | MonoGame bridge | ✅ |
 | Visual player (per-channel view, GIF/MP4 export) | ✅ |
 | ROM extraction via openMSX | ✅ (bit-exact reference path) |
-| ROM extraction in process | 🧪 experimental (tempo ~6 % off; VDP vblank not modelled) |
+| ROM extraction in process (PSG + SCC) | ✅ capture, profile and scan; slots, 6 mappers, T-state timing, 50/60 Hz |
+| ROM extraction: MSX-MUSIC / MSX-AUDIO / SCC+ | ⏳ detected and reported, not recorded yet |
 | Remaster profile (stereo/reverb) | ✅ |
 
 ### Roadmap
 
-1. Model the VDP vblank flag/status and the BIOS interrupt chain so `extract-direct` matches the
-   hardware cadence (then loop detection works and no external emulator is needed).
-2. A `play` CLI command that streams through `MsxAudioEngine` (live preview).
-3. Optional `SoundEffect`-based player for projects that cannot use `DynamicSoundEffectInstance`.
-4. A "song map" view in the roll (density per channel over the whole track, jump by clicking it).
+1. Record MSX-MUSIC (YM2413) and SCC+ in the in-process machine (VGM already has the commands).
+2. Find a game's per-frame sound player automatically, so the scan can silence the game's own music.
+3. Rename scanned ids in the player and write the package back.
+4. A `play` CLI command that streams through `MsxAudioEngine` (live preview).
+5. Optional `SoundEffect`-based player for projects that cannot use `DynamicSoundEffectInstance`.
 
 ## Tests
 
@@ -526,8 +496,10 @@ dotnet test MsxAudio.slnx
 ```
 
 Covers chip frequencies (PSG/SCC formulas), VGM parse/write round-trip, loop detection, package IO,
-the streaming engine (loop continuity, sample voices, volume), streaming vs offline parity, the
-built-in MSX machine (mapper, PSG/SCC capture, id pass-through) and WAV decoding.
+the streaming engine (loop continuity, sample voices, volume), streaming vs offline parity, WAV
+decoding and the built-in MSX machine: every mapper, the SCC window rule, slots and `ENASLT`, the
+PPI, PSG read-back, `HALT` timing, T-state timestamps, 50/60 Hz, mapper detection, the diagnosis and
+the bank-aware sound scan.
 
 ## Legal
 

@@ -28,6 +28,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Wagenheimer.MsxAudio.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Z80dotNet" Version="1.1.0" />
   </ItemGroup>
 

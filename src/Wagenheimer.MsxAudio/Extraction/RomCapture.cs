@@ -125,6 +125,15 @@ public sealed class RomCaptureOptions
 
     /// <summary>Record SCC writes (default true).</summary>
     public bool CaptureScc { get; init; } = true;
+
+    /// <summary>Video refresh rate: 60 (NTSC, default) or 50 (PAL). Sets the tempo of the capture.</summary>
+    public double RefreshRate { get; init; } = 60;
+
+    /// <summary>
+    /// When no <see cref="Keys"/> are given, tap the fire button and the space bar every few seconds so
+    /// the game leaves its title/menu screens by itself.
+    /// </summary>
+    public bool AutoPlay { get; init; }
 }
 
 /// <summary>What a capture produced.</summary>
@@ -153,6 +162,12 @@ public sealed class RomCaptureResult
     /// recording only has mixer/volume traffic — the game did not start its music.
     /// </summary>
     public int NoteWrites { get; init; }
+
+    /// <summary>Why the capture may be silent or incomplete (unsupported chips, BIOS stubs, boot warnings).</summary>
+    public IReadOnlyList<string> Diagnosis { get; init; } = Array.Empty<string>();
+
+    /// <summary>Refresh rate used (50 or 60).</summary>
+    public double RefreshRate { get; init; } = 60;
 }
 
 /// <summary>
@@ -183,10 +198,15 @@ public static class RomCapture
 
         string romPath = RomFile.Resolve(options.RomPath);
         byte[] rom = File.ReadAllBytes(romPath);
-        var machine = new MiniMsx(rom, options.Mapper)
+        RomMapper requested = options.Mapper == RomMapper.Auto
+            ? RomInfo.Analyze(rom).Mapper
+            : options.Mapper;
+
+        var machine = new MiniMsx(rom, requested)
         {
             CapturePsg = options.CapturePsg,
             CaptureScc = options.CaptureScc,
+            RefreshRate = options.RefreshRate,
         };
 
         log?.Invoke($"booting {Path.GetFileName(romPath)} ({rom.Length / 1024} KB)...");
@@ -201,11 +221,17 @@ public static class RomCapture
 
         machine.ResetCapture();
 
-        int frames = Math.Max(1, (int)Math.Round(options.Seconds * 60));
+        int fps = machine.FramesPerSecond;
+        int frames = Math.Max(1, (int)Math.Round(options.Seconds * fps));
         var presses = new List<(int Frame, KeyPress Press)>();
-        foreach (KeyPress press in options.Keys)
+
+        IEnumerable<KeyPress> script = options.Keys.Count == 0 && options.AutoPlay
+            ? AutoPlayScript(options.Seconds)
+            : options.Keys;
+
+        foreach (KeyPress press in script)
         {
-            presses.Add(((int)Math.Round(press.Seconds * 60), press));
+            presses.Add(((int)Math.Round(press.Seconds * fps), press));
             log?.Invoke($"press {press}");
         }
 
@@ -227,7 +253,7 @@ public static class RomCapture
             machine.Frame(options.FrameBudget);
 
             // One log line per second of captured audio.
-            int second = frame / 60;
+            int second = frame / fps;
             if (second != lastReport)
             {
                 lastReport = second;
@@ -238,7 +264,7 @@ public static class RomCapture
 
         progress?.Invoke(frames, frames);
 
-        var vgm = machine.BuildVgm(Path.GetFileNameWithoutExtension(romPath), frames * 735);
+        var vgm = machine.BuildVgm(Path.GetFileNameWithoutExtension(romPath), frames * machine.SamplesPerFrame);
         (double Start, double Duration)? loop = null;
         if (vgm.HasLoop)
         {
@@ -262,9 +288,16 @@ public static class RomCapture
                 noteWrites++;
         }
 
+        IReadOnlyList<string> diagnosis = machine.Diagnose();
+
         if (noteWrites < 20)
+        {
             log?.Invoke($"warning: only {noteWrites} pitch writes — no music captured; " +
-                        "try a longer duration or a key script (e.g. START@1)");
+                        "try a longer duration, a key script (e.g. START@1) or auto-play");
+
+            foreach (string line in diagnosis)
+                log?.Invoke("  why: " + line);
+        }
 
         return new RomCaptureResult
         {
@@ -275,6 +308,26 @@ public static class RomCapture
             Hook = machine.InterruptHook,
             Loop = loop,
             NoteWrites = noteWrites,
+            Diagnosis = diagnosis,
+            RefreshRate = machine.RefreshRate,
         };
+    }
+
+    /// <summary>
+    /// A script that gets most games past their title screen: fire at 1 s, then the fire button and
+    /// the space bar alternately every 3 s.
+    /// </summary>
+    public static List<KeyPress> AutoPlayScript(double seconds)
+    {
+        var script = new List<KeyPress> { new(1, KeyPress.JoystickRow, 4) };
+
+        bool space = true;
+        for (double at = 4; at < seconds - 1; at += 3)
+        {
+            script.Add(space ? new KeyPress(at, 8, 0) : new KeyPress(at, KeyPress.JoystickRow, 4));
+            space = !space;
+        }
+
+        return script;
     }
 }

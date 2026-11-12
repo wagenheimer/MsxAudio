@@ -36,11 +36,18 @@ public static class DirectRomExtractor
         string romPath = RomFile.Resolve(options.RomPath);
         byte[] rom = File.ReadAllBytes(romPath);
         RomMapper mapper = RomMapperNames.Parse(profile.RomType);
+        if (mapper == RomMapper.Auto)
+            mapper = RomInfo.Analyze(rom).Mapper;
+
         var machine = new MiniMsx(rom, mapper)
         {
             CapturePsg = options.CapturePsg,
             CaptureScc = options.CaptureScc,
+            RefreshRate = profile.RefreshRate,
         };
+
+        SoundIdMode idMode = Enum.TryParse(profile.IdRegister, true, out SoundIdMode parsed) ? parsed : SoundIdMode.A;
+        int fps = machine.FramesPerSecond;
 
         bool hooked = machine.Boot();
         var (resolvedMapper, scc) = machine.CartridgeInfo;
@@ -64,7 +71,7 @@ public static class DirectRomExtractor
                 : profile.MusicIds.Contains(id) ? profile.SecondsPerSong : profile.SecondsPerId;
 
             // silence everything first, then start the wanted sound
-            machine.TriggerSound((ushort)profile.SoundCallAddress, profile.StopId);
+            TriggerSound(machine, profile, profile.StopId, idMode);
             for (int i = 0; i < 3; i++) machine.Frame();
 
             // Stream drivers gate by id (lower wins) and remember the song per channel: clearing the
@@ -73,9 +80,9 @@ public static class DirectRomExtractor
                 machine.Write((ushort)address, 0x00);
 
             machine.ResetCapture();
-            machine.TriggerSound((ushort)profile.SoundCallAddress, id | profile.IdMask);
+            TriggerSound(machine, profile, id | profile.IdMask, idMode);
 
-            int frames = Math.Max(1, (int)Math.Round(duration * 60));
+            int frames = Math.Max(1, (int)Math.Round(duration * fps));
 
             for (int i = 0; i < frames; i++)
             {
@@ -91,7 +98,7 @@ public static class DirectRomExtractor
                 }
             }
 
-            var vgm = machine.BuildVgm($"id{id:00}", frames * 735);
+            var vgm = machine.BuildVgm($"id{id:00}", frames * machine.SamplesPerFrame);
             bool music = profile.MusicIds.Contains(id);
             if (music && !vgm.HasLoop)
             {
@@ -112,5 +119,21 @@ public static class DirectRomExtractor
         }
 
         return new ExtractionResult { Library = library, VgmFiles = files };
+    }
+
+    private static void TriggerSound(MiniMsx machine, RomExtractionProfile profile, int id, SoundIdMode mode)
+    {
+        ushort routine = (ushort)profile.SoundCallAddress;
+
+        if (profile.SoundCallBank < 0 || !machine.IsBanked)
+        {
+            machine.TriggerSound(routine, id, mode);
+            return;
+        }
+
+        int[] saved = machine.SaveBanks();
+        machine.SetBank(routine, profile.SoundCallBank);
+        machine.TriggerSound(routine, id, mode);
+        machine.RestoreBanks(saved);
     }
 }

@@ -34,6 +34,7 @@ internal static class Program
                 "extract-direct" => ExtractDirect(args.Skip(1).ToArray()),
                 "scan" => Scan(args.Skip(1).ToArray()),
                 "probe" => Probe(args.Skip(1).ToArray()),
+                "rom-info" => RomInformation(args.Skip(1).ToArray()),
                 "capture" => Capture(args.Skip(1).ToArray()),
                 "render" => Render(args.Skip(1).ToArray()),
                 "verify" => Verify(args.Skip(1).ToArray()),
@@ -60,12 +61,16 @@ internal static class Program
                     drive openMSX to record a ROM's VGMs and build the package
               extract-direct <rom> <out.msxaudio> --profile profile.json
                     run the cartridge driver in process (no external emulator, experimental)
-              scan <rom> <out.msxaudio> [--ids 1-63] [--call ADDR] [--player ADDR] [--profile p.json]
+              scan <rom> <out.msxaudio> [--ids 1-63] [--call ADDR] [--bank N] [--id-reg A|HL|DE|BC]
+                    [--player ADDR] [--profile p.json] [--refresh 50|60] [--seconds N]
                     try every sound id, keep what produces sound (no profile needed)
-              probe <rom>
-                    boot the ROM in the built-in machine and dump the hook state (diagnostics)
-              capture <rom> <out.vgm> [--seconds N] [--mapper ...]
-                    boot the ROM and record whatever the driver plays (no profile needed)
+              probe <rom> [--mapper M] [--refresh 50|60]
+                    boot the ROM in the built-in machine, dump the hook state and say what it is missing
+              capture <rom> <out.vgm> [--seconds N] [--mapper M] [--keys START@1,...] [--auto 1] [--refresh 50|60]
+                    boot the ROM and record whatever the driver plays (no profile needed);
+                    --auto taps fire/space every few seconds to leave title screens
+              rom-info <rom>
+                    size, SHA-1, detected mapper (openMSX database or heuristic) and header
               info <package.msxaudio>
                     list songs/effects, loops and clocks
               render <package.msxaudio> <id|all> <out-dir-or-file> [--profile original|stereo|remaster] [--rate 48000]
@@ -179,17 +184,35 @@ internal static class Program
 
         var profile = args.Any(a => a == "--profile") ? LoadProfile(args) : null;
 
+        int firstId = profile is { Ids.Count: > 0 } ? profile.Ids.Min() : 1;
+        int lastId = profile is { Ids.Count: > 0 } ? profile.Ids.Max() : 63;
+
+        if (Value(args, "--ids") is { Length: > 0 } range && TryParseRange(range, out int first, out int last))
+        {
+            firstId = first;
+            lastId = last;
+        }
+
+        SoundIdMode? idRegister = Enum.TryParse(Value(args, "--id-reg") ?? profile?.IdRegister ?? "", true,
+            out SoundIdMode parsedMode) && (Value(args, "--id-reg") is not null || profile is not null)
+            ? parsedMode
+            : null;
+
         var options = new RomScanOptions
         {
             RomPath = args[0],
             Mapper = RomMapperNames.Parse(Value(args, "--mapper") ?? profile?.RomType),
             SoundCallAddress = ParseAddress(Value(args, "--call")) ?? profile?.SoundCallAddress ?? 0,
+            SoundCallBank = int.TryParse(Value(args, "--bank") ?? "", out int bank) ? bank : profile?.SoundCallBank ?? -1,
+            IdMode = idRegister,
             PlayerAddress = ParseAddress(Value(args, "--player")) ?? profile?.PlayerAddress ?? 0,
             IdMask = int.TryParse(Value(args, "--id-mask") ?? "", out int mask) ? mask : profile?.IdMask ?? 0,
             StopId = profile?.StopId ?? 0,
             SecondsPerId = double.TryParse(Value(args, "--seconds") ?? "", out double seconds) ? seconds : 12,
-            FirstId = profile is { Ids.Count: > 0 } ? profile.Ids.Min() : 1,
-            LastId = profile is { Ids.Count: > 0 } ? profile.Ids.Max() : 63,
+            RefreshRate = double.TryParse(Value(args, "--refresh") ?? "", NumberStyles.Float,
+                CultureInfo.InvariantCulture, out double refresh) ? refresh : profile?.RefreshRate ?? 60,
+            FirstId = firstId,
+            LastId = lastId,
         };
 
         if (profile is not null)
@@ -202,31 +225,12 @@ internal static class Program
                     options.ResetAddresses.Add(address);
         }
 
-        if (Value(args, "--ids") is { Length: > 0 } range &&
-            TryParseRange(range, out int first, out int last))
-        {
-            options = new RomScanOptions
-            {
-                RomPath = options.RomPath,
-                Mapper = options.Mapper,
-                SoundCallAddress = options.SoundCallAddress,
-                PlayerAddress = options.PlayerAddress,
-                IdMask = options.IdMask,
-                StopId = options.StopId,
-                SecondsPerId = options.SecondsPerId,
-                FirstId = first,
-                LastId = last,
-            };
-
-            if (profile is not null)
-                options.ResetAddresses.AddRange(profile.ResetAddresses);
-        }
-
         var result = RomSoundScan.Run(options, Console.WriteLine);
 
         if (result.Songs.Count == 0)
         {
             Console.WriteLine("no sound found");
+            PrintDiagnosis(result.Diagnosis);
             return 1;
         }
 
@@ -297,6 +301,9 @@ internal static class Program
             Mapper = RomMapperNames.Parse(Value(args, "--mapper")),
             Seconds = seconds,
             FrameBudget = int.TryParse(Value(args, "--budget") ?? "", out int budget) ? budget : 200_000,
+            RefreshRate = double.TryParse(Value(args, "--refresh") ?? "", NumberStyles.Float,
+                CultureInfo.InvariantCulture, out double refresh) ? refresh : 60,
+            AutoPlay = (Value(args, "--auto") ?? "").Equals("1", StringComparison.OrdinalIgnoreCase),
         };
 
         options.Keys.AddRange(KeyPress.ParseScript(Value(args, "--keys") ?? Value(args, "--press")));
@@ -314,21 +321,48 @@ internal static class Program
                           (result.Loop is { } loop ? $"; loop {loop.Start:0.000}s + {loop.Duration:0.000}s" : "; no loop detected"));
 
         if (result.NoteWrites < 20)
-            Console.WriteLine("warning: no music captured (mixer writes only); try --seconds longer or --keys START@1");
+        {
+            Console.WriteLine("warning: no music captured (mixer writes only); try --seconds longer, --keys START@1 or --auto 1");
+            PrintDiagnosis(result.Diagnosis);
+        }
 
+        return 0;
+    }
+
+    private static void PrintDiagnosis(IReadOnlyList<string> lines)
+    {
+        foreach (string line in lines)
+            Console.WriteLine("  why: " + line);
+    }
+
+    private static int RomInformation(string[] args)
+    {
+        if (args.Length < 1) return Usage("rom-info <rom>");
+
+        RomInfo info = RomInfo.Analyze(args[0]);
+        Console.WriteLine(info.Summary);
+        Console.WriteLine($"sha1 {info.Sha1}");
+        Console.WriteLine($"loads at {info.LoadBase:X4}; SCC window: {(info.Scc ? "yes" : "no")}");
         return 0;
     }
 
     private static int Probe(string[] args)    {
         if (args.Length < 1) return Usage("probe <rom> [--mapper linear|konami|konami-scc|ascii8|ascii16]");
 
-        byte[] rom = File.ReadAllBytes(args[0]);
+        byte[] rom = File.ReadAllBytes(RomFile.Resolve(args[0]));
         var mapper = RomMapperNames.Parse(Value(args, "--mapper"));
-        var machine = new MiniMsx(rom, mapper) { TraceWrites = true };
+        if (mapper == RomMapper.Auto)
+            mapper = RomInfo.Analyze(rom).Mapper;
+
+        var machine = new MiniMsx(rom, mapper)
+        {
+            TraceWrites = true,
+            RefreshRate = double.TryParse(Value(args, "--refresh") ?? "", NumberStyles.Float,
+                CultureInfo.InvariantCulture, out double refresh) ? refresh : 60,
+        };
         var info = machine.CartridgeInfo;
 
-        Console.WriteLine($"rom {rom.Length} bytes; header INIT={rom[2] | (rom[3] << 8):X4}; " +
-                          $"mapper={RomMapperNames.Name(info.Mapper)}{(info.Scc ? " +SCC" : "")}");
+        Console.WriteLine(RomInfo.Analyze(rom).Summary);
         Console.WriteLine($"after boot: {machine.Boot()}, PC={machine.Pc:X4}, " +
                           $"KEYI={machine.KeyHook:X4}, TIMI={machine.TimerHook:X4}");
         Console.WriteLine($"high-RAM writes during boot: {machine.Trace.Count}");
@@ -345,6 +379,7 @@ internal static class Program
         foreach (var (address, hits) in profile.Hot)
             Console.WriteLine($"  {address:X4}: {hits} samples");
 
+        PrintDiagnosis(machine.Diagnose());
         return 0;
     }
 
