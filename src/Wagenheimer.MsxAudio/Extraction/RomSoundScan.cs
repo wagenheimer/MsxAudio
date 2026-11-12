@@ -51,6 +51,12 @@ public sealed class RomScanOptions
     /// </summary>
     public bool BlockGameCalls { get; init; } = true;
 
+    /// <summary>
+    /// A sound that never ends must change notes at least this often (per second), or it is taken
+    /// for junk read past the end of the id table and skipped.
+    /// </summary>
+    public double MinNotesPerSecond { get; init; } = 2.5;
+
     /// <summary>A sound is over when nothing audible was written for this long.</summary>
     public double EndSilenceSeconds { get; init; } = 1.5;
 
@@ -431,7 +437,13 @@ public static class RomSoundScan
         }
 
         int produced = machine.PitchWriteCount;
-        if (produced < options.MinNoteWrites)
+        if (produced < options.MinNoteWrites || lastActive < 0)
+            return null;
+
+        // Ids past the end of the driver's table read whatever follows it: they "play" a sparse
+        // tone that never ends (a few writes in the whole capture). Real music keeps changing notes.
+        double seconds = machine.SamplesPerFrame > 0 ? maxFrames / (double)fps : options.SecondsPerId;
+        if (!ended && seconds >= 5 && produced / seconds < options.MinNotesPerSecond)
             return null;
 
         // A sound that ended on its own is cut shortly after its last note; one that was still going
@@ -467,11 +479,14 @@ public static class RomSoundScan
         };
     }
 
-    /// <summary>A write that makes sound: a PSG volume above zero, or an SCC volume above zero.</summary>
+    /// <summary>
+    /// A write that shows something is playing: a PSG volume above zero or a tone-period write, an
+    /// SCC volume above zero or a frequency write.
+    /// </summary>
     private static bool IsAudible(VgmEvent e) =>
         e.Kind == VgmEventKind.Psg
-            ? e.P0 is >= 8 and <= 10 && (e.P1 & 0x0F) > 0
-            : e.P0 == 2 && (e.P2 & 0x0F) > 0;
+            ? e.P0 <= 5 || (e.P0 is >= 8 and <= 10 && (e.P1 & 0x0F) > 0)
+            : e.P0 == 1 || (e.P0 == 2 && (e.P2 & 0x0F) > 0);
 
     private static MiniMsx NewMachine(byte[] rom, RomMapper mapper, RomScanOptions options) =>
         new(rom, mapper)
