@@ -139,6 +139,30 @@ player.PlaySample("password_key");
 player.Update();                           // keeps the buffer queue full
 ```
 
+### Or let the host do the plumbing
+
+`MsxAudioHost` wraps library + engine + player and keeps them in sync, which is all a game really
+needs: play a song, play an effect by the id its own code carries, switch profile, toggle music/sfx.
+
+```csharp
+using Wagenheimer.MsxAudio.MonoGame;
+
+_audio = new MsxAudioHost("Content/Audio/game.msxaudio", AudioProfile.Stereo);
+
+_audio.PlayMusic("stage_a");                   // by package id
+_audio.PlayMusicByOriginalId(0x0B, loop: true); // by the id the game's code uses
+_audio.PlayEffectByOriginalId(0x23);            // false when the package has no such sound
+
+_audio.MusicEnabled = false;                    // menu switch (keeps the position)
+_audio.NextProfile();                           // rebuilds the engine and resumes the song
+
+// in Update():
+_audio.Update();
+```
+
+The host only knows about the package, ids and profiles — nothing about a particular game. Game
+policy (which id means "stage 3", which jingle replaces the music) stays in the game.
+
 `Render(float[] destination, int frames)` also gives you **interleaved stereo** if you want to feed
 another backend (SDL, NAudio, a custom mixer, the visualizer...).
 

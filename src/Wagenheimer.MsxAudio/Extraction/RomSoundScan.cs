@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -41,7 +41,7 @@ public sealed class RomScanOptions
     /// <summary>First id to try.</summary>
     public int FirstId { get; init; } = 1;
 
-    /// <summary>Last id to try. Tables vary: King's Valley ends at 32, Penguin Adventure's music goes past 120.</summary>
+    /// <summary>Last id to try. Tables vary a lot between games (some stop at 31, others go past 120).</summary>
     public int LastId { get; init; } = 255;
 
     /// <summary>
@@ -158,7 +158,7 @@ public sealed class RomScanResult
 
     /// <summary>
     /// Builds a <c>.msxaudio</c> library from the songs found. <paramref name="names"/> renames ids
-    /// (<c>11 → "ingame"</c>); ids without a name keep <c>id_NN</c>.
+    /// (<c>11 â†’ "ingame"</c>); ids without a name keep <c>id_NN</c>.
     /// </summary>
     public Songs.MsxAudioLibrary ToLibrary(string title, IReadOnlyDictionary<int, string>? names = null)
     {

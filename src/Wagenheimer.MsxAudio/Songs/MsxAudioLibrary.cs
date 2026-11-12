@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -109,7 +109,7 @@ public sealed class MsxAudioLibrary : IDisposable
         Manifest.Songs.Concat(Manifest.Clips).FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// Finds a song or effect by the **id it has in the original game** (e.g. King's Valley II's
+    /// Finds a song or effect by the **id it has in the original game** (e.g. the driver's
     /// <c>0x0B</c>), which is what a game's event code carries around.
     /// </summary>
     public MsxAudioSong? FindByOriginalId(int originalId) =>

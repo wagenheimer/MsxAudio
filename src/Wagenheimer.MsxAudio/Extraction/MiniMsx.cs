@@ -239,9 +239,9 @@ public sealed class MiniMsx
             Warnings.Add("the header has no INIT (BASIC/statement ROM): only the hooks can run the game");
 
         // The BIOS calls H.STKE after every cartridge INIT, even when the cartridge already
-        // installed an interrupt hook. King's Valley 1 only starts the game from here (its H.KEYI
+        // installed an interrupt hook. Some cartridges only start the game from here (their H.KEYI
         // just silences the PSG), so skipping it left the driver without music. It is also called
-        // when INIT used up its budget: those games (King's Valley II) run their driver from the hook.
+        // when INIT used up its budget: those games run their driver from the hook.
         if (IsHookInstalled(0xFEDA))
             Call(0xFEDA, maxInstructions);
 

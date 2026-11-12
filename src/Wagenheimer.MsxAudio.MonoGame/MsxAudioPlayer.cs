@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.Xna.Framework.Audio;
 using Wagenheimer.MsxAudio.Playback;
 
@@ -9,12 +9,12 @@ namespace Wagenheimer.MsxAudio.MonoGame;
 /// single <see cref="DynamicSoundEffectInstance"/> (streaming, no intermediate file).
 /// </summary>
 /// <remarks>
-/// <para>Call <see cref="Update"/> once per frame — it keeps the buffer queue full. Instead of the
+/// <para>Call <see cref="Update"/> once per frame â€” it keeps the buffer queue full. Instead of the
 /// <c>BufferNeeded</c> event (which may fire on another thread), buffers are submitted on the game
 /// thread, which avoids contention with <see cref="PlaySong"/>.</para>
 ///
 /// <code>
-/// var library = MsxAudioLibrary.Load("Content/Audio/kingsvalley.msxaudio");
+/// var library = MsxAudioLibrary.Load("Content/Audio/game.msxaudio");
 /// var engine  = new MsxAudioEngine(library, AudioProfile.Stereo);
 /// var player  = new MsxAudioPlayer(engine);
 /// player.Start();
@@ -33,7 +33,7 @@ public sealed class MsxAudioPlayer : IDisposable
 
     /// <summary>Creates the player.</summary>
     /// <param name="engine">Engine with the library already loaded.</param>
-    /// <param name="chunkFrames">Frames per buffer (1024 ≈ 21 ms at 48 kHz).</param>
+    /// <param name="chunkFrames">Frames per buffer (1024 â‰ˆ 21 ms at 48 kHz).</param>
     public MsxAudioPlayer(MsxAudioEngine engine, int chunkFrames = 1024)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));
@@ -86,6 +86,18 @@ public sealed class MsxAudioPlayer : IDisposable
     public void PlaySample(string id, float volume = 1f, float pan = 0f)
     {
         lock (_gate) _engine.PlaySample(id, volume, pan);
+    }
+
+    /// <summary>Stops one effect (the original PSG has a single channel per effect).</summary>
+    public void StopSample(string id)
+    {
+        lock (_gate) _engine.StopSample(id);
+    }
+
+    /// <summary>Stops every effect.</summary>
+    public void StopAllSamples()
+    {
+        lock (_gate) _engine.StopAllSamples();
     }
 
     /// <summary>Keeps the buffer queue full. Call once per frame.</summary>
