@@ -42,7 +42,11 @@ public sealed partial class VisualizerGame
 
     private readonly Rectangle[] _exStepHit = new Rectangle[3];
     private Rectangle _exBackHit, _exNextHit, _exChangeRomHit, _exCardNativeHit, _exCardOmsxHit,
-        _exInstallHit, _exPastePathHit, _exCancelInstallHit;
+        _exInstallHit, _exPastePathHit, _exCancelInstallHit, _exAdvancedHit, _exSimpleHit;
+
+    // Step 3 starts in the automatic view: one button, and the app chooses what to run.
+    private bool _extractAdvanced;
+    private bool _extractAutomatic;
 
     private static readonly string[] WizardStepNames = { "ROM", "METHOD", "EXTRACT" };
 
@@ -54,7 +58,7 @@ public sealed partial class VisualizerGame
         _exOpenFolderHit = _exFmtAutoHit = _exFmtVgmHit = _exFmtPkgHit = _exPsgHit = _exSccHit = Rectangle.Empty;
         _exStartHit = _exScanHit = Rectangle.Empty;
         _exBackHit = _exNextHit = _exChangeRomHit = _exCardNativeHit = _exCardOmsxHit = Rectangle.Empty;
-        _exInstallHit = _exPastePathHit = _exCancelInstallHit = Rectangle.Empty;
+        _exInstallHit = _exPastePathHit = _exCancelInstallHit = _exAdvancedHit = _exSimpleHit = Rectangle.Empty;
         Array.Fill(_exStepHit, Rectangle.Empty);
     }
 
@@ -587,7 +591,270 @@ public sealed partial class VisualizerGame
             return true;
         }
 
+        if (_exAdvancedHit.Contains(p))
+        {
+            _extractAdvanced = true;
+            return true;
+        }
+
+        if (_exSimpleHit.Contains(p))
+        {
+            _extractAdvanced = false;
+            return true;
+        }
+
         return false;
+    }
+
+    // ── Step 3, automatic ────────────────────────────────────────────────────────
+
+    private sealed record AutoPlan(bool Scan, string? ProfilePath, string? ProfileName, int Seconds);
+
+    private (string Path, RomExtractionProfile Profile)? _readyProfile;
+    private string _readyProfileFor = string.Empty;
+
+    /// <summary>Folders that may hold ready-made profiles: next to the app, in the working folder, and up the tree.</summary>
+    private static IEnumerable<string> ProfileFolders()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        IEnumerable<string> Candidates()
+        {
+            yield return Path.Combine(AppContext.BaseDirectory, "profiles");
+            yield return Path.Combine(Directory.GetCurrentDirectory(), "profiles");
+
+            DirectoryInfo? up = new(AppContext.BaseDirectory);
+            for (int i = 0; i < 8 && up is not null; i++, up = up.Parent)
+                yield return Path.Combine(up.FullName, "profiles");
+        }
+
+        foreach (string folder in Candidates())
+        {
+            if (Directory.Exists(folder) && seen.Add(Path.GetFullPath(folder)))
+                yield return folder;
+        }
+    }
+
+    /// <summary>A ready-made profile whose ROM hash matches the chosen cartridge, if there is one.</summary>
+    private (string Path, RomExtractionProfile Profile)? ReadyProfile()
+    {
+        if (_readyProfileFor == _extractRom)
+            return _readyProfile;
+
+        _readyProfileFor = _extractRom;
+        _readyProfile = null;
+
+        string? sha = _extractInfo?.Sha1;
+        if (sha is null)
+            return null;
+
+        foreach (string folder in ProfileFolders())
+        {
+            foreach (string file in Directory.EnumerateFiles(folder, "*.json"))
+            {
+                try
+                {
+                    RomExtractionProfile profile = RomExtractionProfiles.Load(file);
+                    if (profile.RomSha1.Exists(h => h.Equals(sha, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        _readyProfile = (file, profile);
+                        return _readyProfile;
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or InvalidDataException or System.Text.Json.JsonException)
+                {
+                    // a broken profile file is not a reason to stop looking
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>What the automatic button will run for this cartridge and method.</summary>
+    private AutoPlan DecideAutoPlan()
+    {
+        if (ReadyProfile() is { } ready)
+            return new AutoPlan(false, ready.Path, ready.Profile.Name, 0);
+
+        // openMSX records; it cannot search for the sound ids. The built-in extractor can.
+        return _extractMethod == 1
+            ? new AutoPlan(false, null, null, 45)
+            : new AutoPlan(true, null, null, 40);
+    }
+
+    private string[] PlanLines()
+    {
+        AutoPlan plan = DecideAutoPlan();
+        bool omsx = _extractMethod == 1;
+
+        if (plan.ProfileName is not null)
+        {
+            return new[]
+            {
+                $"A READY-MADE PROFILE FOR THIS GAME WAS FOUND: {plan.ProfileName.ToUpperInvariant()}.",
+                "IT KNOWS THE SOUND ROUTINE, THE IDS AND THE NAMES, SO EVERY SONG AND EFFECT COMES OUT NAMED.",
+                omsx ? "IT RUNS IN OPENMSX, WITH EVERY CHIP THE GAME USES."
+                     : "IT RUNS ON THE BUILT-IN EXTRACTOR (PSG AND SCC), USUALLY UNDER A MINUTE.",
+                "RESULT: ONE .MSXAUDIO PACK THAT OPENS IN THE PLAYER.",
+            };
+        }
+
+        if (!omsx)
+        {
+            return new[]
+            {
+                "FIND ALL SONGS: THE APP LOOKS FOR THE GAME'S SOUND ROUTINE AND TRIES EVERY SOUND ID (1 TO 255).",
+                "IT KEEPS ONLY WHAT REALLY MAKES SOUND, CUTS EACH ONE WHERE IT ENDS, AND SORTS MUSIC FROM EFFECTS.",
+                "RESULT: ONE .MSXAUDIO PACK (THE SONGS ARE CALLED ID_NN: RENAME THEM IN THE PLAYER). USUALLY 1 TO 3 MINUTES.",
+                "IF NO SOUND ROUTINE IS FOUND, IT RECORDS WHAT THE GAME PLAYS FOR 40 SECONDS, PRESSING THE BUTTONS FOR YOU.",
+            };
+        }
+
+        return new[]
+        {
+            "CAPTURE IN OPENMSX: THE GAME RUNS FOR 45 SECONDS WITH THE BUTTONS PRESSED FOR YOU (START, FIRE, SPACE).",
+            "EVERY CHIP THE MACHINE HAS IS RECORDED, INCLUDING FM (MSX-MUSIC).",
+            "RESULT: ONE .VGM WITH WHAT PLAYED. FOR EVERY SONG OF THE GAME, GO BACK AND PICK THE BUILT-IN EXTRACTOR.",
+            "NEED SOMETHING ELSE (OTHER KEYS, MORE SECONDS, A PROFILE)? PRESS MORE OPTIONS.",
+        };
+    }
+
+    /// <summary>The main button: the automatic plan in the simple view, the chosen mode in the other.</summary>
+    private void StartPrimary()
+    {
+        if (_extractAdvanced || _extractRunning)
+        {
+            StartExtraction(scan: false);
+            return;
+        }
+
+        AutoPlan plan = DecideAutoPlan();
+
+        _extractMode = plan.ProfilePath is null ? ExtractMode.Capture : ExtractMode.Profile;
+        if (plan.ProfilePath is not null)
+            _extractProfile = plan.ProfilePath;
+
+        if (plan.Seconds > 0)
+            _extractSeconds = plan.Seconds;
+
+        _extractAutoPress = true;
+        _extractFormat = 2;
+        _extractAutomatic = true;
+
+        StartExtraction(plan.Scan);
+    }
+
+    private void DrawStepExtractSimple(int dx, int dy, int dw, int dh)
+    {
+        int labelX = dx + 16;
+        int fieldX = dx + 92;
+        int fieldW = dw - 92 - 116;
+        int pathW = fieldW - 66;
+        bool omsx = _extractMethod == 1;
+
+        RefreshExtractInfo();
+
+        Text("STEP 3 OF 3 - READY: PRESS THE BUTTON AND THE APP DOES THE REST", dx + 300, dy + 36, Accent);
+
+        Text("ROM", labelX, dy + 64, Dim);
+        Text(FitTextLeft(_extractRom.ToUpperInvariant(), fieldW), fieldX, dy + 64, TextColor);
+        _exChangeRomHit = new Rectangle(fieldX + fieldW + 8, dy + 60, 84, 16);
+        DrawButton(_exChangeRomHit, "CHANGE", false, Accent);
+
+        Text("METHOD", labelX, dy + 80, Dim);
+        Text(omsx ? "OPENMSX - EXACT, EVERY CHIP" : "BUILT-IN EXTRACTOR (EXPERIMENTAL) - PSG AND SCC",
+            fieldX, dy + 80, omsx ? SccColor : Accent);
+
+        // What will happen, in plain words.
+        int y = dy + 108;
+        Text("WHAT WILL HAPPEN", labelX, y, Accent);
+        string[] lines = PlanLines();
+        for (int i = 0; i < lines.Length; i++)
+            Text(FitText(lines[i], dw - 32), labelX, y + 16 + i * 13, i == lines.Length - 1 && !omsx ? Dim : TextColor);
+
+        // Where the result goes.
+        y = dy + 188;
+        Text("OUTPUT", labelX, y + 6, Dim);
+        _exOutHit = new Rectangle(fieldX, y, pathW, 18);
+        DrawPathField(_exOutHit, OutputFolder(), "(NEXT TO THE ROM)", _extractField == 3);
+        _exOutPasteHit = new Rectangle(fieldX + pathW + 6, y, 60, 18);
+        DrawButton(_exOutPasteHit, "PASTE", false, Accent);
+        _exOutBrowseHit = new Rectangle(fieldX + fieldW + 8, y, 84, 18);
+        DrawButton(_exOutBrowseHit, "FOLDER", false, Accent);
+
+        Text("THE FOLDER IS CREATED IF IT DOES NOT EXIST. THE RESULT OPENS IN THE PLAYER WHEN IT IS DONE.",
+            fieldX, y + 24, Dim);
+
+        _exOpenFolderHit = new Rectangle(fieldX + fieldW + 8, y + 22, 84, 14);
+        DrawButton(_exOpenFolderHit, "OPEN FOLDER", false, Accent);
+
+        // The button, then the progress.
+        y = dy + 250;
+        _exStartHit = new Rectangle(fieldX, y, 260, 28);
+        DrawButton(_exStartHit, _extractRunning ? "STOP" : "EXTRACT AUTOMATICALLY", true,
+            _extractRunning ? Warn : Accent);
+
+        if (!_extractRunning)
+        {
+            _exAdvancedHit = new Rectangle(fieldX + 270, y, 140, 28);
+            DrawButton(_exAdvancedHit, "MORE OPTIONS", false, Dim);
+        }
+
+        int barX = fieldX + 424;
+        float filled = Math.Clamp(_extractFrame / (float)_extractTotalFrames, 0f, 1f);
+
+        if (_extractRunning)
+        {
+            DrawSpinner(barX + 8, y + 14, 7);
+            barX += 24;
+        }
+
+        int barW = dx + dw - 16 - barX - 46;
+        Rect(barX, y + 10, barW, 8, Grid);
+        Rect(barX, y + 10, (int)(barW * filled), 8, _extractRunning ? PsgColor : Accent);
+        Text($"{(int)(filled * 100)}%", barX + barW + 10, y + 10, _extractRunning ? TextColor : Dim);
+
+        if (_extractRunning)
+        {
+            TimeSpan elapsed = DateTime.UtcNow - _extractStarted;
+            Text($"WORKING... {(int)elapsed.TotalMinutes:00}:{elapsed.Seconds:00}  (ESC STOPS)", fieldX, y + 36, PsgColor);
+        }
+        else if (_extractError is { } error)
+        {
+            Text(FitText(error, dw - 120), fieldX, y + 36, Warn);
+        }
+
+        // What is happening (or has happened), line by line.
+        int logTop = dy + 306;
+        int logBottom = dy + dh - 34;
+        Rect(dx + 16, logTop - 6, dw - 32, 1, Grid);
+
+        var logLines = new List<string>();
+        lock (_extractLogLock)
+        {
+            int max = Math.Max(1, (logBottom - logTop) / 12);
+            int start = Math.Max(0, _extractLog.Count - max);
+            for (int i = start; i < _extractLog.Count; i++)
+                logLines.Add(_extractLog[i]);
+        }
+
+        for (int i = 0; i < logLines.Count; i++)
+            Text(FitText(logLines[i], dw - 40), dx + 16, logTop + i * 12, i == logLines.Count - 1 ? TextColor : Dim);
+
+        if (logLines.Count == 0)
+        {
+            Text("WHAT IS HAPPENING APPEARS HERE: THE STEPS, THE SOUNDS FOUND AND ANYTHING THAT WENT WRONG.",
+                dx + 16, logTop, Dim);
+        }
+
+        if (!_extractRunning)
+        {
+            _exBackHit = new Rectangle(dx + 16, dy + dh - 28, 90, 18);
+            DrawButton(_exBackHit, "< BACK", false, Accent);
+        }
+
+        Text("ENTER STARTS · ESC CANCELS", dx + 120, dy + dh - 22, Dim);
     }
 
     // ── openMSX jobs ─────────────────────────────────────────────────────────────

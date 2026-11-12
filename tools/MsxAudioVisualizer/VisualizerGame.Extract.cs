@@ -116,6 +116,11 @@ public sealed partial class VisualizerGame : Game
         _extractError = null;
         _wizardStep = 0;
 
+        // Docs/CI: pick the method (MSXAUDIO_METHOD=1 is openMSX).
+        if (Environment.GetEnvironmentVariable("MSXAUDIO_METHOD") == "1")
+            _extractMethod = 1;
+        _extractAdvanced = Environment.GetEnvironmentVariable("MSXAUDIO_ADVANCED") == "1";
+
         // Docs/CI: jump straight to a step (MSXAUDIO_WIZARD_STEP=1 or 2).
         if (int.TryParse(Environment.GetEnvironmentVariable("MSXAUDIO_WIZARD_STEP"), out int wanted) && wanted is 1 or 2)
         {
@@ -287,6 +292,9 @@ public sealed partial class VisualizerGame : Game
         ExtractMode mode = _extractMode;
         int method = _extractMethod;
         string? omsxPath = _omsxPath;
+        bool automatic = _extractAutomatic;
+        _extractAutomatic = false;
+        string captureOutput = OutputPath("_capture", ".vgm");
 
         _extractError = null;
         lock (_extractLogLock)
@@ -329,7 +337,22 @@ public sealed partial class VisualizerGame : Game
                 }
 
                 if (scan)
-                    return RunScanJob(rom, mapperIndex, profilePath, psg, scc, refresh, token, output);
+                {
+                    string? scanned = RunScanJob(rom, mapperIndex, profilePath, psg, scc, refresh, token, output);
+
+                    // Automatic mode never leaves you with nothing: no sound routine found means a
+                    // plain capture, with the buttons pressed for you.
+                    if (scanned is null && automatic && !token.IsCancellationRequested)
+                    {
+                        AddExtractLog("the scan found no sound: recording what the game plays instead (40 s, buttons pressed for you)");
+                        _extractError = null;
+                        _extractOutput = captureOutput;
+                        return RunCaptureJob(rom, mapperIndex, keys, Math.Max(seconds, 40), false, psg, scc, refresh,
+                            true, token, captureOutput);
+                    }
+
+                    return scanned;
+                }
 
                 return mode == ExtractMode.Profile
                     ? RunProfileJob(rom, profilePath, psg, scc, refresh, token, output)
@@ -705,7 +728,7 @@ public sealed partial class VisualizerGame : Game
             if (_wizardStep < 2)
                 GoNext();
             else
-                StartExtraction(scan: false);
+                StartPrimary();
 
             return;
         }
@@ -893,7 +916,7 @@ public sealed partial class VisualizerGame : Game
 
         if (_exStartHit.Contains(p))
         {
-            StartExtraction(scan: false);
+            StartPrimary();
             return;
         }
 
@@ -992,10 +1015,13 @@ public sealed partial class VisualizerGame : Game
                 return;
         }
 
-        DrawStepExtract(dx, dy, dw, dh);
+        if (_extractAdvanced)
+            DrawStepExtract(dx, dy, dw, dh);
+        else
+            DrawStepExtractSimple(dx, dy, dw, dh);
     }
 
-    /// <summary>Step 3: what to extract, the options, and the run (progress and log).</summary>
+    /// <summary>Step 3 with every option: what to extract, the options, and the run (progress and log).</summary>
     private void DrawStepExtract(int dx, int dy, int dw, int dh)
     {
         int labelX = dx + 16;
@@ -1049,7 +1075,7 @@ public sealed partial class VisualizerGame : Game
         Text("MAPPER", labelX, dy + 126, Dim);
         if (omsx)
         {
-            Text("AUTO (OPENMSX KNOWS THE CARTRIDGE)", fieldX, dy + 126, Dim);
+            Text("AUTO (OPENMSX)", fieldX, dy + 126, Dim);
         }
         else
         {
@@ -1245,6 +1271,9 @@ public sealed partial class VisualizerGame : Game
         {
             _exBackHit = new Rectangle(dx + 16, dy + dh - 28, 90, 18);
             DrawButton(_exBackHit, "< BACK", false, Accent);
+
+            _exSimpleHit = new Rectangle(dx + dw - 190, dy + dh - 28, 174, 18);
+            DrawButton(_exSimpleHit, "AUTOMATIC VIEW", false, Accent);
         }
 
         Text("ENTER RUNS · ESC CANCELS · THE RESULT OPENS HERE WHEN IT IS DONE",

@@ -40,6 +40,12 @@ public sealed class RomExtractionProfile
     /// <summary>Game/profile name.</summary>
     public string Name { get; set; } = "MSX";
 
+    /// <summary>
+    /// SHA-1 of the ROM images this profile was made for (lower-case hex). The player uses it to pick
+    /// the profile by itself when such a ROM is chosen.
+    /// </summary>
+    public List<string> RomSha1 { get; set; } = new();
+
     /// <summary>openMSX machine (e.g. <c>C-BIOS_MSX2_JP</c>).</summary>
     public string Machine { get; set; } = "C-BIOS_MSX2_JP";
 

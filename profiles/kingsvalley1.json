@@ -1,5 +1,6 @@
 {
   "name": "King's Valley",
+  "romSha1": [ "a4383f789482a9e868a9f136aa722129673c2a81" ],
   "machine": "C-BIOS_MSX1",
   "romType": "linear",
   "soundCallAddress": 31401,

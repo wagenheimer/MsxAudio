@@ -1,5 +1,6 @@
 {
   "name": "King's Valley II",
+  "romSha1": [ "cfd872d005b7bd4cdd6e06c4c0162191f0b0415d" ],
   "machine": "C-BIOS_MSX2_JP",
   "soundCallAddress": 17198,
   "stopId": 1,

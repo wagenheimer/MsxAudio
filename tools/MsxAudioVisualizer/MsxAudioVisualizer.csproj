@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <None Update="icon.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\profiles\*.json" Link="profiles\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
