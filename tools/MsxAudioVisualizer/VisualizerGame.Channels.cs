@@ -142,6 +142,14 @@ public sealed partial class VisualizerGame : Game
             Rect(sx + 8, stripY + 6, 6, 6, color);
             Text(isPsg ? $"PSG{info.Number}" : $"SCC{info.Number}", sx + 18, stripY + 6, color);
 
+            // The automatic mix says what it made of the channel (TUNE, BASS, ARP, PAD, DRUM).
+            if (_player.AutoMixPlan is { } plan)
+            {
+                string tag = AutoMixPlan.RoleTag(plan.Channels[ch].Role);
+                if (tag.Length > 0)
+                    Text(tag, sx + 18 + 28, stripY + 6, audible ? TextColor : Dim);
+            }
+
             var soloRect = new Rectangle(sx + stripW - 38, stripY + 4, 14, 12);
             var muteRect = new Rectangle(sx + stripW - 20, stripY + 4, 14, 12);
             _soloHit[ch] = soloRect;

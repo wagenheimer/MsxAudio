@@ -160,6 +160,20 @@ public sealed class MsxAudioLibrary : IDisposable
         return clip;
     }
 
+    /// <summary>Removes a song or effect (and its VGM) from the package. False when the id is unknown.</summary>
+    public bool Remove(string id)
+    {
+        MsxAudioSong? song = Find(id);
+        if (song is null)
+            return false;
+
+        Manifest.Songs.Remove(song);
+        Manifest.Clips.Remove(song);
+        _entries.Remove(song.Entry);
+        _loaded.Remove(song.Entry);
+        return true;
+    }
+
     /// <summary>Adds an arbitrary file (e.g. a sample WAV, a readme).</summary>
     public void AddEntry(string entry, byte[] data) => _entries[entry] = data;
 
@@ -196,7 +210,14 @@ public sealed class MsxAudioLibrary : IDisposable
         using var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true);
         WriteEntry(archive, "manifest.json", JsonSerializer.SerializeToUtf8Bytes(Manifest, JsonOptions));
         foreach (var (name, data) in _entries)
+        {
+            // The manifest above is the current one: a copy kept from Load would be stale (and would
+            // shadow it, silently undoing a rename or a delete).
+            if (string.Equals(name, "manifest.json", StringComparison.OrdinalIgnoreCase))
+                continue;
+
             WriteEntry(archive, name, data);
+        }
     }
 
     /// <summary>Loads a package from disk.</summary>
@@ -234,6 +255,7 @@ public sealed class MsxAudioLibrary : IDisposable
             }
         }
 
+        library._entries.Remove("manifest.json");
         return library;
     }
 

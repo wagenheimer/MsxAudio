@@ -52,6 +52,10 @@ public sealed partial class VisualizerGame : Game
         int extractWidth = PixelFont.Measure(extractLabel) + 14;
         _extractButtonHit = new Rectangle(chipX - 8 - extractWidth, 28, extractWidth, 15);
 
+        const string exportLabel = "EXPORT AUDIO";
+        int exportWidth = PixelFont.Measure(exportLabel) + 14;
+        _exportButtonHit = new Rectangle(_extractButtonHit.X - 8 - exportWidth, 28, exportWidth, 15);
+
         if (p is not null)
         {
             string name = Path.GetFileNameWithoutExtension(p.Name).ToUpperInvariant();
@@ -78,6 +82,7 @@ public sealed partial class VisualizerGame : Game
 
         DrawButton(_profileButtonHit, profileLabel, true, Accent);
         DrawButton(_extractButtonHit, extractLabel, false, Accent);
+        DrawButton(_exportButtonHit, exportLabel, false, CanExport ? Accent : Dim);
     }
 
     private static string FormatTime(double seconds)
@@ -214,7 +219,16 @@ public sealed partial class VisualizerGame : Game
     }
 
     // Transport bar (design coordinates, set in DrawFooter).
-    private Rectangle _prevHit, _playHit, _nextHit, _loopHit, _volHit, _aHit, _bHit, _psgHit, _sccHit;
+    private Rectangle _prevHit, _playHit, _stopHit, _nextHit, _volHit, _aHit, _bHit, _psgHit, _sccHit;
+    private Rectangle _endLoopHit, _endNextHit, _endStopHit, _exportButtonHit;
+
+    /// <summary>Stopped (not just paused): the song is back at 0 and waits for play.</summary>
+    private bool _stopped;
+
+    private enum EndMode { Loop, Next, Stop }
+
+    /// <summary>What happens when a song ends: repeat it, go to the next one, or stop.</summary>
+    private EndMode CurrentEndMode => _loopEnabled ? EndMode.Loop : _autoNext ? EndMode.Next : EndMode.Stop;
     private bool _volumeDragging;
 
     private void DrawFooter()
@@ -227,21 +241,39 @@ public sealed partial class VisualizerGame : Game
         int y = VH - 46;
         int x = 16;
 
-        _prevHit = new Rectangle(x, y, 26, 18);
-        DrawButton(_prevHit, "<<", false, Accent);
-        x += 30;
+        // Transport: previous, play/pause, stop, next. The icons are drawn, not typed, so they stay
+        // the same size and are readable at any window scale.
+        bool loaded = _player is not null;
+        bool playing = loaded && !_paused;
 
-        _playHit = new Rectangle(x, y, 48, 18);
-        DrawButton(_playHit, _paused ? "PLAY" : "PAUSE", false, Accent);
-        x += 52;
+        _prevHit = new Rectangle(x, y, 28, 18);
+        DrawIconButton(_prevHit, TransportIcon.Previous, false, loaded || _tracks.Count > 0);
+        x += 32;
 
-        _nextHit = new Rectangle(x, y, 26, 18);
-        DrawButton(_nextHit, ">>", false, Accent);
-        x += 38;
+        _playHit = new Rectangle(x, y, 36, 18);
+        DrawIconButton(_playHit, playing ? TransportIcon.Pause : TransportIcon.Play, playing, loaded);
+        x += 40;
 
-        _loopHit = new Rectangle(x, y, 46, 18);
-        DrawButton(_loopHit, "LOOP", _loopEnabled, Accent);
-        x += 54;
+        _stopHit = new Rectangle(x, y, 28, 18);
+        DrawIconButton(_stopHit, TransportIcon.Stop, _stopped, loaded);
+        x += 32;
+
+        _nextHit = new Rectangle(x, y, 28, 18);
+        DrawIconButton(_nextHit, TransportIcon.Next, false, loaded || _tracks.Count > 0);
+        x += 44;
+
+        // What happens when a song ends: one choice, always visible (LOOP, NEXT or STOP).
+        Text("AT END", x, y + 6, Dim);
+        x += 42;
+
+        EndMode mode = CurrentEndMode;
+        _endLoopHit = new Rectangle(x, y, 38, 18);
+        DrawButton(_endLoopHit, "LOOP", mode == EndMode.Loop, Accent);
+        _endNextHit = new Rectangle(x + 40, y, 38, 18);
+        DrawButton(_endNextHit, "NEXT", mode == EndMode.Next, Accent);
+        _endStopHit = new Rectangle(x + 80, y, 38, 18);
+        DrawButton(_endStopHit, "STOP", mode == EndMode.Stop, Accent);
+        x += 118 + 22;
 
         Text("VOL", x, y + 6, Dim);
         _volHit = new Rectangle(x + 26, y + 6, 96, 8);
@@ -291,6 +323,7 @@ public sealed partial class VisualizerGame : Game
         if (_sound is null)
             return;
 
+        _stopped = false;
         _paused = !_paused;
         if (_paused)
             _sound.Pause();
@@ -298,8 +331,33 @@ public sealed partial class VisualizerGame : Game
             FlushAudio();
     }
 
+    /// <summary>Stops: back to the start, silent, waiting for play (pause keeps the position).</summary>
+    private void StopPlayback()
+    {
+        if (_player is null)
+            return;
+
+        _player.Restart();
+        ClearNotes();
+        _paused = true;
+        _stopped = true;
+        _sound?.Pause();
+        _status = "STOPPED";
+        _statusTimer = 2f;
+    }
+
+    /// <summary>Previous: restarts the song when it has played for a few seconds, otherwise goes back one.</summary>
     private void PrevTrack()
     {
+        if (_player is not null && _player.Time > 3.0)
+        {
+            _player.Restart();
+            ClearNotes();
+            FlushAudio();
+            _stopped = false;
+            return;
+        }
+
         if (_tracks.Count > 0)
             LoadTrack((_selected - 1 + _tracks.Count) % _tracks.Count);
     }
@@ -310,18 +368,94 @@ public sealed partial class VisualizerGame : Game
             LoadTrack((_selected + 1) % _tracks.Count);
     }
 
-    private void ToggleLoop()
+    /// <summary>Sets what happens at the end of a song and remembers it.</summary>
+    private void SetEndMode(EndMode mode)
     {
-        _loopEnabled = !_loopEnabled;
+        _loopEnabled = mode == EndMode.Loop;
+
+        if (mode != EndMode.Loop)
+            _autoNext = mode == EndMode.Next;
 
         if (_player is not null)
             _player.LoopEnabled = _loopEnabled;
 
         _settings.Loop = _loopEnabled;
+        _settings.AutoNext = _autoNext;
         _settings.Save();
 
-        _status = _loopEnabled ? "LOOP ON" : "LOOP OFF";
+        _status = mode switch
+        {
+            EndMode.Loop => "AT END: REPEAT THE SONG",
+            EndMode.Next => "AT END: GO TO THE NEXT SONG",
+            _ => "AT END: STOP",
+        };
         _statusTimer = 2f;
+    }
+
+    /// <summary>L key: LOOP, then NEXT, then STOP, then LOOP again.</summary>
+    private void ToggleLoop() => SetEndMode(CurrentEndMode switch
+    {
+        EndMode.Loop => EndMode.Next,
+        EndMode.Next => EndMode.Stop,
+        _ => EndMode.Loop,
+    });
+
+    private enum TransportIcon { Previous, Play, Pause, Stop, Next }
+
+    /// <summary>A button with a drawn icon (a bar and a triangle, two bars, a square...).</summary>
+    private void DrawIconButton(Rectangle rect, TransportIcon icon, bool active, bool enabled)
+    {
+        Color color = !enabled ? Grid : active ? Accent : TextColor;
+
+        Rect(rect, active ? Accent : Grid);
+        Rect(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2, active ? PanelHi : PanelColor);
+
+        const int size = 9;
+        int x = rect.X + (rect.Width - size) / 2;
+        int y = rect.Y + (rect.Height - size) / 2;
+
+        switch (icon)
+        {
+            case TransportIcon.Play:
+                DrawTriangle(x + 1, y, size, pointRight: true, color);
+                break;
+
+            case TransportIcon.Pause:
+                Rect(x + 1, y, 3, size, color);
+                Rect(x + 6, y, 3, size, color);
+                break;
+
+            case TransportIcon.Stop:
+                Rect(x + 1, y + 1, size - 2, size - 2, color);
+                break;
+
+            case TransportIcon.Previous:
+                Rect(x, y, 2, size, color);
+                DrawTriangle(x + 3, y, size, pointRight: false, color);
+                break;
+
+            case TransportIcon.Next:
+                DrawTriangle(x, y, size, pointRight: true, color);
+                Rect(x + size - 2, y, 2, size, color);
+                break;
+        }
+    }
+
+    /// <summary>A filled triangle <paramref name="height"/> pixels tall, one pixel row at a time.</summary>
+    private void DrawTriangle(int x, int y, int height, bool pointRight, Color color)
+    {
+        int half = height / 2;
+
+        for (int row = 0; row < height; row++)
+        {
+            int width = half + 1 - Math.Abs(row - half);          // 1 at the ends, half + 1 in the middle
+            width = Math.Max(1, width);
+
+            if (pointRight)
+                Rect(x, y + row, width, 1, color);
+            else
+                Rect(x + half + 1 - width, y + row, width, 1, color);
+        }
     }
 
     private void ToggleChip(bool psg)
@@ -396,7 +530,7 @@ public sealed partial class VisualizerGame : Game
 
     private void DrawHelp()
     {
-        const int w = 660, h = 504;
+        const int w = 660, h = 602;
         int x = (VW - w) / 2, y = (VH - h) / 2;
         Panel(x, y, w, h, PanelHi);
         Rect(x, y, w, 24, PanelColor);
@@ -409,10 +543,13 @@ public sealed partial class VisualizerGame : Game
         {
             "TAB / HEADER   SPECTRUM / PIANO ROLL / PIANO",
             "F2 / CTRL+O    OPEN FOLDER (RECURSIVE OPTION)",
-            "F3             EXTRACT MUSIC FROM A CARTRIDGE",            "F5             RESCAN THE CURRENT FOLDER",
+            "F3             EXTRACT MUSIC FROM A CARTRIDGE",
+            "E              EXPORT AUDIO: WAV / MP3 / MIDI",            "F5             RESCAN THE CURRENT FOLDER",
             "UP / DOWN      MOVE THE TRACK CURSOR (HOLD TO REPEAT)",
             "PAGE UP/DOWN   MOVE THE CURSOR A PAGE · HOME / END",
-            "ENTER / CLICK  PLAY THE TRACK UNDER THE CURSOR",
+            "ENTER / CLICK  PLAY THE TRACK / FOLD A PACK (LEFT, RIGHT TOO)",
+            "F4 / RIGHT-CLK RENAME A SONG, A FILE OR A PACK",
+            "DEL            DELETE (PACK REWRITTEN / RECYCLE BIN)",
             "T              PLAY EVERY ROW THE CURSOR LANDS ON",
             "WHEEL          SCROLL THE TRACK LIST",
             "SPACE          PAUSE / RESUME",
@@ -425,7 +562,9 @@ public sealed partial class VisualizerGame : Game
             "O              MIXING PROFILE (DIALOG)",
             "SHIFT+O        NEXT PROFILE",
             "A / B          A-B LOOP (A AGAIN CLEARS)",
-            "L              AUTO NEXT",
+            "L              AT END: LOOP / NEXT / STOP",
+            "X              STOP (BACK TO 0:00, WAITS FOR PLAY)",
+            ", AND .         PREVIOUS / NEXT SONG",
             "R              RESTART",
             "H              THIS HELP",
             "ESC            CLOSE DIALOG / QUIT",

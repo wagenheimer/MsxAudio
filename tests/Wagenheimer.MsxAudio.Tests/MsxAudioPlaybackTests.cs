@@ -16,6 +16,45 @@ public class MsxAudioPlaybackTests
     private const double Clock = 1789772.5;
 
     [Fact]
+    public void Library_RemoveAndRenameSurviveASaveAndLoad()
+    {
+        var library = new MsxAudioLibrary("pack");
+        library.AddSong("a", "First", BuildTone(totalSeconds: 2));
+        library.AddSong("b", "Second", BuildTone(totalSeconds: 2));
+        library.AddClip("c", "Beep", BuildTone(totalSeconds: 1));
+
+        string path = Path.Combine(Path.GetTempPath(), $"msxaudio-test-{Guid.NewGuid():N}.msxaudio");
+        try
+        {
+            library.Save(path);
+
+            using (MsxAudioLibrary edited = MsxAudioLibrary.Load(path))
+            {
+                Assert.True(edited.Remove("a"));
+                Assert.True(edited.Remove("c"));
+                Assert.False(edited.Remove("nope"));
+                edited.Find("b")!.Name = "Renamed";
+                edited.Save(path + ".tmp");
+            }
+
+            File.Move(path + ".tmp", path, overwrite: true);
+
+            using MsxAudioLibrary reloaded = MsxAudioLibrary.Load(path);
+            Assert.Single(reloaded.Songs);
+            Assert.Empty(reloaded.Clips);
+            Assert.Equal("Renamed", reloaded.Songs[0].Name);
+            Assert.NotNull(reloaded.ReadEntry(reloaded.Songs[0].Entry));
+            Assert.Null(reloaded.ReadEntry("songs/a.vgm"));
+            Assert.Null(reloaded.ReadEntry("clips/c.vgm"));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+            if (File.Exists(path + ".tmp")) File.Delete(path + ".tmp");
+        }
+    }
+
+    [Fact]
     public void Library_RoundTripsSongsAndLoops()
     {
         var library = new MsxAudioLibrary("teste");

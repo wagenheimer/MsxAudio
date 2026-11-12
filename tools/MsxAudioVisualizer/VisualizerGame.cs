@@ -168,6 +168,7 @@ public sealed partial class VisualizerGame : Game
 
         _volume = Math.Clamp(_settings.Volume, 0f, 1f);
         _loopEnabled = _settings.Loop;
+        _autoNext = _settings.AutoNext;
 
         // CLI wins; otherwise use what the user had last time.
         _profile = profile ?? AudioProfile.ByName(_settings.Profile);
@@ -241,7 +242,12 @@ public sealed partial class VisualizerGame : Game
 
         // Typing into the extraction dialog (path and key script) goes through the window, so accented
         // characters and the keyboard layout work as the user expects.
-        Window.TextInput += (_, e) => OnExtractTextInput(e.Character);
+        Window.TextInput += (_, e) =>
+        {
+            OnExtractTextInput(e.Character);
+            OnEditTextInput(e.Character);
+            OnExportTextInput(e.Character);
+        };
 
         Exiting += (_, _) => SaveSettings();
         Exiting += (_, _) =>
@@ -386,8 +392,23 @@ public sealed partial class VisualizerGame : Game
 
             if (!_paused)
             {
-                if (!_shotPending && _player.Finished && _autoNext && _tracks.Count > 0)
-                    LoadTrack((_selected + 1) % _tracks.Count);
+                if (!_shotPending && _player.Finished)
+                {
+                    // The song ended: repeat it, go on to the next one, or stop, as chosen under "AT END".
+                    if (_loopEnabled)
+                    {
+                        _player.Restart();
+                        ClearNotes();
+                    }
+                    else if (_autoNext && _tracks.Count > 0)
+                    {
+                        LoadTrack((_selected + 1) % _tracks.Count);
+                    }
+                    else if (!_stopped)
+                    {
+                        StopPlayback();
+                    }
+                }
 
                 if (_shotPending)
                     AdvanceForScreenshot();
@@ -503,6 +524,7 @@ public sealed partial class VisualizerGame : Game
         _settings.View = _view.ToString().ToLowerInvariant();
         _settings.Volume = _volume;
         _settings.Loop = _loopEnabled;
+        _settings.AutoNext = _autoNext;
 
         try
         {

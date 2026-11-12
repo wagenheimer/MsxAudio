@@ -30,7 +30,20 @@ public sealed partial class VisualizerGame : Game
     private int _playlistFirst;
     private int _playlistRows;
     private int _playlistLastSelected = -1;
-    private int _cursor;                      // row the keyboard is on (the playing track is _selected)
+    private int _cursor;                      // ROW the keyboard is on (the playing track is _selected)
+
+    // What the list shows: pack headers (which fold) and the tracks that are not hidden by one.
+    private readonly record struct PlaylistRow(int Track, string? Pack, int Count, bool Collapsed)
+    {
+        public bool IsHeader => Track < 0;
+    }
+
+    private readonly List<PlaylistRow> _rows = new();
+    private readonly HashSet<string> _collapsedPacks = new(StringComparer.OrdinalIgnoreCase);
+    private bool _rowsDirty = true;
+    private Rectangle _collapseAllHit, _expandAllHit;
+    private bool _editDemoDone;
+    private bool _exportDemoDone;
     private bool _browsePlays;                // play every row the cursor lands on (T)
     private Rectangle _playlistRect;
     private Rectangle _playlistScrollTrack;
@@ -92,6 +105,7 @@ public sealed partial class VisualizerGame : Game
 
         _tracks.Clear();
         _tracks.AddRange(result.Files);
+        _rowsDirty = true;
         _scanError = result.Error;
 
         if (_listSelectPath is not null)
@@ -110,6 +124,42 @@ public sealed partial class VisualizerGame : Game
 
         if (_player is null && _tracks.Count > 0)
             LoadTrack(_selected);
+
+        // Docs/CI: start with the packs folded, or with an edit dialog open (screenshots only).
+        if (Environment.GetEnvironmentVariable("MSXAUDIO_COLLAPSE") == "1")
+            SetAllPacks(true);
+
+        // Docs/CI: open the export dialog (and run it) at startup: MSXAUDIO_EXPORT=wav,mp3,mid [MSXAUDIO_EXPORT_DIR].
+        if (Environment.GetEnvironmentVariable("MSXAUDIO_EXPORT") is { Length: > 0 } formats && !_exportDemoDone &&
+            _tracks.Count > 0 && _player is not null)
+        {
+            _exportDemoDone = true;
+            OpenExportDialog();
+            _expWav = formats.Contains("wav", StringComparison.OrdinalIgnoreCase);
+            _expMp3 = formats.Contains("mp3", StringComparison.OrdinalIgnoreCase);
+            _expMidi = formats.Contains("mid", StringComparison.OrdinalIgnoreCase);
+
+            if (Environment.GetEnvironmentVariable("MSXAUDIO_EXPORT_DIR") is { Length: > 0 } dir)
+            {
+                _expFolder = dir;
+                _expFolderAuto = false;
+            }
+
+            if (Environment.GetEnvironmentVariable("MSXAUDIO_EXPORT_RUN") == "1")
+                StartExport();
+        }
+
+        if (Environment.GetEnvironmentVariable("MSXAUDIO_EDIT") is { Length: > 0 } edit && _tracks.Count > 0 && !_editDemoDone)
+        {
+            _editDemoDone = true;
+            EnsureRows();
+            int row = Math.Min(1, _rows.Count - 1);
+
+            if (edit == "menu")
+                OpenRowMenu(row, new Point(120, 160));
+            else
+                BeginEdit(row, edit == "delete" ? EditMode.Delete : EditMode.Rename);
+        }
 
         _status = result.Error is null
             ? $"FOUND {_tracks.Count} FILE(S)"
@@ -293,7 +343,124 @@ public sealed partial class VisualizerGame : Game
     }
 
     /// <summary>Moves the viewport so the selected row is visible.</summary>
-    private void EnsureSelectedVisible() => EnsureVisible(_selected);
+    /// <summary>Rebuilds the visible rows: a header per pack with two or more songs, then its songs unless folded.</summary>
+    private void EnsureRows()
+    {
+        if (!_rowsDirty)
+            return;
+
+        _rowsDirty = false;
+        _rows.Clear();
+
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (VgmEntry track in _tracks)
+        {
+            if (track.SongId is not null)
+                counts[track.Path] = counts.TryGetValue(track.Path, out int n) ? n + 1 : 1;
+        }
+
+        string? current = null;
+
+        for (int i = 0; i < _tracks.Count; i++)
+        {
+            VgmEntry track = _tracks[i];
+            string? pack = track.SongId is not null && counts[track.Path] >= 2 ? track.Path : null;
+
+            if (pack is not null && !string.Equals(pack, current, StringComparison.OrdinalIgnoreCase))
+                _rows.Add(new PlaylistRow(-1, pack, counts[pack], _collapsedPacks.Contains(pack)));
+
+            current = pack;
+
+            if (pack is not null && _collapsedPacks.Contains(pack))
+                continue;
+
+            _rows.Add(new PlaylistRow(i, pack, 0, false));
+        }
+
+        _cursor = Math.Clamp(_cursor, 0, Math.Max(0, _rows.Count - 1));
+    }
+
+    /// <summary>The row to put the cursor on for a track: its own row, or its pack's header when folded.</summary>
+    private int RowOfTrack(int track)
+    {
+        EnsureRows();
+
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            if (_rows[i].Track == track)
+                return i;
+        }
+
+        if (track >= 0 && track < _tracks.Count && _tracks[track].SongId is not null)
+        {
+            for (int i = 0; i < _rows.Count; i++)
+            {
+                if (_rows[i].IsHeader && string.Equals(_rows[i].Pack, _tracks[track].Path, StringComparison.OrdinalIgnoreCase))
+                    return i;
+            }
+        }
+
+        return 0;
+    }
+
+    private int ClampRow(int row) => Math.Clamp(row, 0, Math.Max(0, _rows.Count - 1));
+
+    /// <summary>Folds or unfolds a pack, keeping the cursor on the header that was clicked.</summary>
+    private void TogglePack(string pack)
+    {
+        if (!_collapsedPacks.Remove(pack))
+            _collapsedPacks.Add(pack);
+
+        _rowsDirty = true;
+        EnsureRows();
+
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            if (_rows[i].IsHeader && string.Equals(_rows[i].Pack, pack, StringComparison.OrdinalIgnoreCase))
+            {
+                _cursor = i;
+                EnsureVisible(i);
+                break;
+            }
+        }
+    }
+
+    private void SetAllPacks(bool collapsed)
+    {
+        _collapsedPacks.Clear();
+
+        if (collapsed)
+        {
+            foreach (VgmEntry track in _tracks)
+            {
+                if (track.SongId is not null)
+                    _collapsedPacks.Add(track.Path);
+            }
+        }
+
+        _rowsDirty = true;
+        EnsureRows();
+        _cursor = RowOfTrack(_selected);
+        EnsureVisible(_cursor);
+    }
+
+    /// <summary>A row was chosen (click or Enter): a header folds, a track plays.</summary>
+    private void ActivateRow(int row)
+    {
+        EnsureRows();
+        if (row < 0 || row >= _rows.Count)
+            return;
+
+        _cursor = row;
+        PlaylistRow item = _rows[row];
+
+        if (item.IsHeader)
+            TogglePack(item.Pack!);
+        else
+            LoadTrack(item.Track);
+    }
+
+    private void EnsureSelectedVisible() => EnsureVisible(RowOfTrack(_selected));
 
     /// <summary>Scrolls the list just enough to show row <paramref name="index"/>.</summary>
     private void EnsureVisible(int index)
@@ -306,30 +473,32 @@ public sealed partial class VisualizerGame : Game
         else if (index >= _playlistFirst + _playlistRows)
             _playlistFirst = index - _playlistRows + 1;
 
-        _playlistFirst = Math.Clamp(_playlistFirst, 0, Math.Max(0, _tracks.Count - _playlistRows));
+        _playlistFirst = Math.Clamp(_playlistFirst, 0, Math.Max(0, _rows.Count - _playlistRows));
     }
 
     /// <summary>Scrolls the playlist by <paramref name="delta"/> rows (wheel uses ±3).</summary>
     private void ScrollPlaylist(int delta)
     {
-        if (_tracks.Count <= _playlistRows)
+        EnsureRows();
+        if (_rows.Count <= _playlistRows)
             return;
 
-        _playlistFirst = Math.Clamp(_playlistFirst + delta, 0, _tracks.Count - _playlistRows);
+        _playlistFirst = Math.Clamp(_playlistFirst + delta, 0, _rows.Count - _playlistRows);
     }
 
     /// <summary>Centres the scrollbar thumb on the mouse (click or drag).</summary>
     private void ScrollPlaylistTo(int mouseY)
     {
-        if (_tracks.Count <= _playlistRows || _playlistScrollTrack.Height <= 0)
+        EnsureRows();
+        if (_rows.Count <= _playlistRows || _playlistScrollTrack.Height <= 0)
             return;
 
         int listH = _playlistScrollTrack.Height;
-        int thumbH = Math.Max(18, listH * _playlistRows / _tracks.Count);
+        int thumbH = Math.Max(18, listH * _playlistRows / _rows.Count);
         int span = Math.Max(1, listH - thumbH);
 
         float t = Math.Clamp((mouseY - _playlistScrollTrack.Y - thumbH / 2f) / span, 0f, 1f);
-        _playlistFirst = (int)Math.Round(t * (_tracks.Count - _playlistRows));
+        _playlistFirst = (int)Math.Round(t * (_rows.Count - _playlistRows));
     }
 
     private void DrawPlaylist()
@@ -341,7 +510,18 @@ public sealed partial class VisualizerGame : Game
 
         // "61 SONGS IN 1 PACK": says when one file holds many songs (a .msxaudio pack).
         if (_tracks.Count > 0)
-            Text(FitText(DescribeEntries(_tracks).Trim('(', ')'), w - 130), x + 64, y + 8, Dim);
+            Text(FitText(DescribeEntries(_tracks).Trim('(', ')'), w - 190), x + 64, y + 8, Dim);
+
+        // Fold / unfold every pack at once (only when there are packs).
+        EnsureRows();
+        _collapseAllHit = _expandAllHit = Rectangle.Empty;
+        if (_rows.Exists(r => r.IsHeader))
+        {
+            _collapseAllHit = new Rectangle(x + w - 100, y + 3, 20, 15);
+            DrawButton(_collapseAllHit, "-", false, Accent);
+            _expandAllHit = new Rectangle(x + w - 78, y + 3, 20, 15);
+            DrawButton(_expandAllHit, "+", false, Accent);
+        }
 
         // Open-folder button in the panel header.
         _openFolderHit = new Rectangle(x + w - 54, y + 3, 44, 15);
@@ -358,29 +538,34 @@ public sealed partial class VisualizerGame : Game
 
         // Keep the viewport valid; only snap to the selection when it actually changed (otherwise
         // scrolling away from the playing track would be impossible).
-        int maxFirst = Math.Max(0, _tracks.Count - rows);
+        int maxFirst = Math.Max(0, _rows.Count - rows);
         _playlistFirst = Math.Clamp(_playlistFirst, 0, maxFirst);
 
         if (_selected != _playlistLastSelected)
         {
             _playlistLastSelected = _selected;
-            _cursor = _selected;
+            _cursor = RowOfTrack(_selected);
             EnsureSelectedVisible();
         }
 
-        _cursor = Clamp0(_cursor);
+        _cursor = ClampRow(_cursor);
         int first = _playlistFirst;
         Point mouse = MouseDesign();
 
         _trackHit.Clear();
 
-        for (int i = 0; i < rows && first + i < _tracks.Count; i++)
+        string? playingPack = _selected >= 0 && _selected < _tracks.Count && _tracks[_selected].SongId is not null
+            ? _tracks[_selected].Path
+            : null;
+
+        for (int i = 0; i < rows && first + i < _rows.Count; i++)
         {
             int index = first + i;
             int rowY = listTop + i * 18;
-            bool active = index == _selected;           // the track that is playing
-            bool atCursor = index == _cursor;           // where the keyboard is
-            var entry = _tracks[index];
+            PlaylistRow row = _rows[index];
+            bool header = row.IsHeader;
+            bool active = !header && row.Track == _selected;     // the track that is playing
+            bool atCursor = index == _cursor;                    // where the keyboard is
 
             var rowRect = new Rectangle(x + 4, rowY - 5, w - 22, 18);
             bool hover = rowRect.Contains(mouse) && _dialog == DialogKind.None;
@@ -401,7 +586,34 @@ public sealed partial class VisualizerGame : Game
 
             _trackHit.Add((rowRect, index));
 
-            // Songs that live in the same .msxaudio pack share a coloured stripe on the left.
+            if (header)
+            {
+                // A pack: fold arrow, its name, how many songs it holds, and ">" when the playing
+                // song is one of them (the song itself may be hidden by the fold).
+                Color packColor = PackColor(row.Pack);
+                Rect(x + 7, rowY - 3, 2, 15, packColor);
+                DrawFoldArrow(x + 14, rowY + 3, row.Collapsed, packColor);
+
+                string pack = Path.GetFileNameWithoutExtension(row.Pack ?? string.Empty).ToUpperInvariant();
+                string count = $"({row.Count})";
+                int room = (w - 64 - PixelFont.Measure(count)) / 6;
+                if (pack.Length > room)
+                    pack = room > 1 ? pack[..(room - 1)] + "…" : string.Empty;
+
+                Text(pack, x + 28, rowY, atCursor ? Accent : TextColor);
+                Text(count, x + 28 + PixelFont.Measure(pack) + 6, rowY, Dim);
+
+                if (playingPack is not null && string.Equals(playingPack, row.Pack, StringComparison.OrdinalIgnoreCase) &&
+                    row.Collapsed)
+                    Text(">", x + w - 26, rowY, Accent);
+
+                continue;
+            }
+
+            var entry = _tracks[row.Track];
+
+            // Songs of a pack are indented under their header, with the pack's stripe.
+            bool inPack = row.Pack is not null;
             if (entry.SongId is not null)
                 Rect(x + 7, rowY - 3, 2, 15, PackColor(entry.Source));
 
@@ -409,31 +621,20 @@ public sealed partial class VisualizerGame : Game
             if (active)
                 Text(">", x + 10, rowY, Accent);
 
-            const int nameOffset = 22;
+            int nameOffset = inPack ? 30 : 22;
             string name = entry.Name.ToUpperInvariant();
-            int maxName = _settings.Recursive ? 16 : 22;
+            int maxName = (_settings.Recursive ? 16 : 22) - (inPack ? 1 : 0);
             if (name.Length > maxName)
                 name = name[..maxName];
 
-            Text(name, x + nameOffset, rowY, active ? Accent : atCursor ? TextColor : TextColor);
+            Text(name, x + nameOffset, rowY, active ? Accent : TextColor);
 
-            if (_settings.Recursive)
+            if (_settings.Recursive && !inPack)
             {
                 string folder = Path.GetFileName(entry.Folder).ToUpperInvariant();
                 if (folder.Length > 9)
                     folder = folder[..9];
                 Text(folder, x + nameOffset + (maxName + 2) * 6, rowY, Dim);
-            }
-            else if (entry.SongId is not null)
-            {
-                // Song from a .msxaudio package: show which package it came from.
-                string source = Path.GetFileNameWithoutExtension(entry.Source ?? string.Empty).ToUpperInvariant();
-                int room = Math.Max(0, (w - 60) / 6 - maxName - 4);
-                if (source.Length > room)
-                    source = room > 1 ? source[..(room - 1)] + "…" : string.Empty;
-
-                if (source.Length > 0)
-                    Text(source, x + nameOffset + (maxName + 2) * 6, rowY, Dim);
             }
 
             if (entry.Seconds is double seconds)
@@ -447,11 +648,11 @@ public sealed partial class VisualizerGame : Game
         _playlistScrollTrack = new Rectangle(x + w - 10, listTop, 6, listH);
         _playlistScrollThumb = Rectangle.Empty;
 
-        if (_tracks.Count > rows)
+        if (_rows.Count > rows)
         {
             Rect(_playlistScrollTrack, Grid);
 
-            int thumbH = Math.Max(18, listH * rows / _tracks.Count);
+            int thumbH = Math.Max(18, listH * rows / _rows.Count);
             int span = Math.Max(1, listH - thumbH);
             int thumbY = listTop + (int)Math.Round(span * (_playlistFirst / (float)Math.Max(1, maxFirst)));
 
@@ -504,9 +705,28 @@ public sealed partial class VisualizerGame : Game
         // How the keyboard works here, and where the cursor is.
         if (_tracks.Count > 0)
         {
-            string hint = $"ROW {_cursor + 1}/{_tracks.Count} UP/DN MOVE ENTER PLAYS T:AUTO " +
+            string hint = $"ROW {_cursor + 1}/{_rows.Count} UP/DN MOVE ENTER PLAYS/FOLDS T:AUTO " +
                           (_browsePlays ? "ON" : "OFF");
             Text(hint, x + 10, listY + 48, _browsePlays ? Accent : Dim);
+        }
+    }
+
+    /// <summary>A small triangle: pointing right when the pack is folded, down when it is open.</summary>
+    private void DrawFoldArrow(int x, int y, bool collapsed, Color color)
+    {
+        if (collapsed)
+        {
+            Rect(x, y - 3, 1, 7, color);
+            Rect(x + 1, y - 2, 1, 5, color);
+            Rect(x + 2, y - 1, 1, 3, color);
+            Rect(x + 3, y, 1, 1, color);
+        }
+        else
+        {
+            Rect(x - 3, y - 2, 7, 1, color);
+            Rect(x - 2, y - 1, 5, 1, color);
+            Rect(x - 1, y, 3, 1, color);
+            Rect(x, y + 1, 1, 1, color);
         }
     }
 

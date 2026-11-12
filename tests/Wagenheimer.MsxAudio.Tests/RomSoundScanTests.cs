@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Wagenheimer.MsxAudio.Extraction;
+using Wagenheimer.MsxAudio.Vgm;
 using Xunit;
 
 namespace Wagenheimer.MsxAudio.Tests;
@@ -35,17 +36,15 @@ public class RomSoundScanTests
         rom[init + 2] = SoundRoutine >> 8;
         rom[init + 3] = 0xC9;
 
-        // Sound routine: LD C,A / LD A,0 / OUT (A0h),A / LD A,C / OUT (A1h),A / RET
+        // Sound routine: LD C,A / LD A,0 / OUT (A0h),A / LD A,C / OUT (A1h),A   (tone period = id)
+        //                LD A,8 / OUT (A0h),A / LD A,15 / OUT (A1h),A / RET       (channel A at full volume)
         int sound = SoundRoutine - 0x4000;
-        rom[sound + 0] = 0x4F;
-        rom[sound + 1] = 0x3E;
-        rom[sound + 2] = 0x00;
-        rom[sound + 3] = 0xD3;
-        rom[sound + 4] = 0xA0;
-        rom[sound + 5] = 0x79;
-        rom[sound + 6] = 0xD3;
-        rom[sound + 7] = 0xA1;
-        rom[sound + 8] = 0xC9;
+        byte[] routine =
+        {
+            0x4F, 0x3E, 0x00, 0xD3, 0xA0, 0x79, 0xD3, 0xA1,
+            0x3E, 0x08, 0xD3, 0xA0, 0x3E, 0x0F, 0xD3, 0xA1, 0xC9,
+        };
+        Array.Copy(routine, 0, rom, sound, routine.Length);
 
         return rom;
     }
@@ -55,6 +54,41 @@ public class RomSoundScanTests
         string path = Path.Combine(Path.GetTempPath(), "msxaudio-scan-" + Guid.NewGuid().ToString("N") + ".rom");
         File.WriteAllBytes(path, BuildRom());
         return path;
+    }
+
+    private static VgmEvent Psg(byte register, byte value) => new(0, VgmEventKind.Psg, register, value, 0);
+
+    [Fact]
+    public void HasAudibleSound_IsFalseForPitchChangesWithTheVolumeAtZero()
+    {
+        var events = new List<VgmEvent> { Psg(0, 0x20), Psg(1, 0x01), Psg(8, 0x00), Psg(0, 0x40) };
+
+        Assert.False(RomSoundScan.HasAudibleSound(events));
+    }
+
+    [Fact]
+    public void HasAudibleSound_IsTrueWhenAChannelHasVolumeAndToneOn()
+    {
+        var events = new List<VgmEvent> { Psg(0, 0x20), Psg(8, 0x0F) };
+
+        Assert.True(RomSoundScan.HasAudibleSound(events));
+    }
+
+    [Fact]
+    public void HasAudibleSound_IsFalseWhenTheMixerSilencesTheChannel()
+    {
+        // Mixer 0xFF: tone and noise off on every channel; volume alone makes no sound.
+        var events = new List<VgmEvent> { Psg(7, 0xFF), Psg(8, 0x0F), Psg(9, 0x0F), Psg(10, 0x0F) };
+
+        Assert.False(RomSoundScan.HasAudibleSound(events));
+    }
+
+    [Fact]
+    public void HasAudibleSound_HearsTheSccVolume()
+    {
+        var events = new List<VgmEvent> { new(0, VgmEventKind.Scc, 2, 0, 0x0A) };
+
+        Assert.True(RomSoundScan.HasAudibleSound(events));
     }
 
     [Fact]

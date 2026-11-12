@@ -451,6 +451,11 @@ public static class RomSoundScan
         int keepFrames = ended ? Math.Min(frame + 1, lastActive + tailFrames + 1) : maxFrames;
         VgmFile vgm = machine.BuildVgm($"id_{id:00}", keepFrames * machine.SamplesPerFrame);
 
+        // Writing notes is not enough: a capture that never makes a sound (volume at zero, channels
+        // muted in the mixer) is not audio, however long it ran.
+        if (!HasAudibleSound(vgm.Events))
+            return null;
+
         (double Start, double Duration)? loop = null;
         if (vgm.HasLoop && vgm.LoopSeconds >= 2)
         {
@@ -477,6 +482,49 @@ public static class RomSoundScan
             LoopStart = loop?.Start ?? 0,
             LoopSeconds = loop?.Duration ?? 0,
         };
+    }
+
+    /// <summary>
+    /// True when the register stream, replayed in order, ever has a channel that can be heard: a PSG
+    /// channel with volume (or the envelope) and its tone or noise enabled in the mixer, or an SCC
+    /// channel with volume. A stream of pitch changes with the volume at zero is silence.
+    /// </summary>
+    internal static bool HasAudibleSound(IReadOnlyList<VgmEvent> events)
+    {
+        // Typical state right after a driver's init: tone on, noise off, everything else zero.
+        var psg = new byte[16];
+        psg[7] = 0x38;
+        var sccVolume = new byte[5];
+
+        foreach (VgmEvent e in events)
+        {
+            if (e.Kind == VgmEventKind.Psg)
+            {
+                if (e.P0 >= psg.Length)
+                    continue;
+
+                psg[e.P0] = e.P1;
+
+                for (int channel = 0; channel < 3; channel++)
+                {
+                    byte volume = psg[8 + channel];
+                    bool loud = (volume & 0x0F) > 0 || ((volume & 0x10) != 0 && (psg[11] | psg[12]) != 0);
+                    bool toneOn = (psg[7] & (1 << channel)) == 0;
+                    bool noiseOn = (psg[7] & (8 << channel)) == 0;
+
+                    if (loud && (toneOn || noiseOn))
+                        return true;
+                }
+            }
+            else if (e.P0 == 2 && e.P1 < sccVolume.Length)
+            {
+                sccVolume[e.P1] = (byte)(e.P2 & 0x0F);
+                if (sccVolume[e.P1] > 0)
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

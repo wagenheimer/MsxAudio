@@ -39,6 +39,13 @@ public sealed class AudioProfile
     /// <summary>Normalizes the peak to this value (0 = keep the chip level, authentic).</summary>
     public float NormalizePeak { get; init; }
 
+    /// <summary>
+    /// Mix each channel by what it does in the song (tune, bass, arpeggio, pad, drums): the analysis
+    /// of the register writes picks level, pan, tone, saturation, echo and reverb per channel, and a
+    /// bus compressor and limiter finish it. The panning, filter and reverb fields above are ignored.
+    /// </summary>
+    public bool AutoMix { get; init; }
+
     /// <summary>Master gain applied to the chip sum (before becoming PCM).</summary>
     public float MasterGain { get; init; } = DefaultMasterGain;
 
@@ -81,8 +88,16 @@ public sealed class AudioProfile
         NormalizePeak = 0.89f,
     };
 
+    /// <summary>Automatic mix: every channel treated for its role in the song.</summary>
+    public static AudioProfile Auto => new()
+    {
+        Name = "auto",
+        Oversample = 8,
+        AutoMix = true,
+    };
+
     /// <summary>Ready-made profiles.</summary>
-    public static AudioProfile[] All => new[] { Original, Stereo, Remaster };
+    public static AudioProfile[] All => new[] { Original, Stereo, Remaster, Auto };
 
     /// <summary>Copy of the profile with another oversampling factor (short effects can use less).</summary>
     public AudioProfile WithOversample(int oversample) => new()
@@ -98,6 +113,7 @@ public sealed class AudioProfile
         ReverbMix = ReverbMix,
         NormalizePeak = NormalizePeak,
         MasterGain = MasterGain,
+        AutoMix = AutoMix,
     };
 
     /// <summary>Finds a profile by name (default: original).</summary>
@@ -105,6 +121,7 @@ public sealed class AudioProfile
     {
         "stereo" or "estéreo" => Stereo,
         "remaster" or "master" => Remaster,
+        "auto" or "automix" or "auto mix" => Auto,
         _ => Original,
     };
 }

@@ -6,6 +6,19 @@ All notable changes to this package are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (auto mix, export, transport)
+- **Auto mix profile** (`auto`): the register writes are analysed to find what each channel does (tune,
+  bass, arpeggio, pad, drums); each role gets its own level, pan, low cut, tone, saturation, echo and
+  reverb send, then a bus compressor and a soft limiter. Works in the live player and in
+  `MsxSoundRenderer`; the player shows the role on every channel strip (`AutoMixAnalyzer`,
+  `AutoMixProcessor`).
+- **Export** (player: `E` or the EXPORT AUDIO chip): the current song or every song in the list as
+  **WAV**, **MP3** (LAME, 128-320 kbps, ID3 title) and/or **MIDI** (the notes, one track per voice and a
+  drum track, loop markers). WAV and MP3 repeat the loop N times and fade out
+  (`AudioExporter`, `MidiExporter`, `VgmTranscriber`).
+- **Transport**: drawn icons, a real stop, previous restarts the song after 3 s, and an AT END choice
+  (LOOP / NEXT / STOP).
+
 ### Added (export assistant, track list, scan)
 - **Export assistant** (F3): 1 ROM, 2 METHOD, 3 EXTRACT. A test run of the cartridge reports which
   chips it uses and recommends openMSX (FM / MSX-AUDIO / SCC+) or the built-in extractor.

@@ -40,6 +40,44 @@ public sealed class Biquad
         return b;
     }
 
+    /// <summary>Creates a low shelf (boosts or cuts everything below the frequency).</summary>
+    public static Biquad CreateLowShelf(double sampleRate, double frequency, double gainDb)
+    {
+        var b = new Biquad();
+        double a = Math.Pow(10, gainDb / 40.0);
+        double w0 = 2 * Math.PI * frequency / sampleRate;
+        double cos = Math.Cos(w0);
+        double alpha = Math.Sin(w0) / 2 * Math.Sqrt(2.0);          // shelf slope 1
+        double beta = 2 * Math.Sqrt(a) * alpha;
+
+        double a0 = (a + 1) + (a - 1) * cos + beta;
+        b._b0 = a * ((a + 1) - (a - 1) * cos + beta) / a0;
+        b._b1 = 2 * a * ((a - 1) - (a + 1) * cos) / a0;
+        b._b2 = a * ((a + 1) - (a - 1) * cos - beta) / a0;
+        b._a1 = -2 * ((a - 1) + (a + 1) * cos) / a0;
+        b._a2 = ((a + 1) + (a - 1) * cos - beta) / a0;
+        return b;
+    }
+
+    /// <summary>Creates a high shelf (boosts or cuts everything above the frequency).</summary>
+    public static Biquad CreateHighShelf(double sampleRate, double frequency, double gainDb)
+    {
+        var b = new Biquad();
+        double a = Math.Pow(10, gainDb / 40.0);
+        double w0 = 2 * Math.PI * frequency / sampleRate;
+        double cos = Math.Cos(w0);
+        double alpha = Math.Sin(w0) / 2 * Math.Sqrt(2.0);
+        double beta = 2 * Math.Sqrt(a) * alpha;
+
+        double a0 = (a + 1) - (a - 1) * cos + beta;
+        b._b0 = a * ((a + 1) + (a - 1) * cos + beta) / a0;
+        b._b1 = -2 * a * ((a - 1) + (a + 1) * cos) / a0;
+        b._b2 = a * ((a + 1) + (a - 1) * cos - beta) / a0;
+        b._a1 = 2 * ((a - 1) - (a + 1) * cos) / a0;
+        b._a2 = ((a + 1) - (a - 1) * cos - beta) / a0;
+        return b;
+    }
+
     /// <summary>Processes one sample.</summary>
     public double Process(double x)
     {

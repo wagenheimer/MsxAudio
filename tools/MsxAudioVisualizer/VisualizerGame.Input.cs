@@ -48,7 +48,6 @@ public sealed partial class VisualizerGame : Game
         return false;
     }
 
-    private int Clamp0(int index) => Math.Clamp(index, 0, Math.Max(0, _tracks.Count - 1));
 
     private Point MouseDesign()
     {
@@ -77,6 +76,9 @@ public sealed partial class VisualizerGame : Game
         if (Pressed(Keys.F3))
             OpenExtractDialog();
 
+        if (Pressed(Keys.E))
+            OpenExportDialog();
+
         if (Pressed(Keys.H))
             _showHelp = !_showHelp;
 
@@ -92,10 +94,13 @@ public sealed partial class VisualizerGame : Game
                 OpenProfileDialog();
         }
 
-        // The keyboard drives the track list: a cursor moves through it (held keys repeat) and
-        // ENTER plays the row under the cursor. The playing track and the song position are not
-        // touched while browsing, unless "play on move" (T) is on.
-        if (_tracks.Count > 0)
+        // The keyboard drives the track list: a cursor moves through its rows (held keys repeat),
+        // ENTER plays the track under it (or folds/unfolds a pack header), and on a header LEFT folds
+        // and RIGHT unfolds. The playing track and the song position are not touched while browsing,
+        // unless "play on move" (T) is on.
+        EnsureRows();
+
+        if (_rows.Count > 0)
         {
             int page = Math.Max(1, _playlistRows - 2);
             int move = 0;
@@ -109,30 +114,38 @@ public sealed partial class VisualizerGame : Game
             {
                 bool single = Math.Abs(move) == 1;
                 _cursor = single
-                    ? (Clamp0(_cursor) + move + _tracks.Count) % _tracks.Count
-                    : Math.Clamp(Clamp0(_cursor) + move, 0, _tracks.Count - 1);
+                    ? (ClampRow(_cursor) + move + _rows.Count) % _rows.Count
+                    : Math.Clamp(ClampRow(_cursor) + move, 0, _rows.Count - 1);
                 EnsureVisible(_cursor);
 
-                if (_browsePlays)
-                    LoadTrack(_cursor);
+                if (_browsePlays && !_rows[_cursor].IsHeader)
+                    LoadTrack(_rows[_cursor].Track);
             }
 
             if (Pressed(Keys.Home))
             {
                 _cursor = 0;
                 EnsureVisible(_cursor);
-                if (_browsePlays) LoadTrack(_cursor);
+                if (_browsePlays && !_rows[_cursor].IsHeader) LoadTrack(_rows[_cursor].Track);
             }
 
             if (Pressed(Keys.End))
             {
-                _cursor = _tracks.Count - 1;
+                _cursor = _rows.Count - 1;
                 EnsureVisible(_cursor);
-                if (_browsePlays) LoadTrack(_cursor);
+                if (_browsePlays && !_rows[_cursor].IsHeader) LoadTrack(_rows[_cursor].Track);
             }
 
             if (Pressed(Keys.Enter))
-                LoadTrack(Clamp0(_cursor));
+                ActivateRow(ClampRow(_cursor));
+        }
+
+        if (_rows.Count > 0)
+        {
+            if (Pressed(Keys.F4))
+                BeginEdit(ClampRow(_cursor), EditMode.Rename);
+            else if (Pressed(Keys.Delete))
+                BeginEdit(ClampRow(_cursor), EditMode.Delete);
         }
 
         if (Pressed(Keys.T))
@@ -152,14 +165,27 @@ public sealed partial class VisualizerGame : Game
             FlushAudio();
         }
 
-        if (Pressed(Keys.Left) && _player is not null)
+        PlaylistRow cursorRow = _rows.Count > 0 ? _rows[ClampRow(_cursor)] : default;
+        bool onHeader = _rows.Count > 0 && cursorRow.IsHeader;
+
+        if (onHeader && Pressed(Keys.Left))
+        {
+            if (!cursorRow.Collapsed)
+                TogglePack(cursorRow.Pack!);
+        }
+        else if (onHeader && Pressed(Keys.Right))
+        {
+            if (cursorRow.Collapsed)
+                TogglePack(cursorRow.Pack!);
+        }
+        else if (Pressed(Keys.Left) && _player is not null)
         {
             _player.Seek(Math.Max(0, _player.Time - 5));
             ClearNotes();
             FlushAudio();
         }
 
-        if (Pressed(Keys.Right) && _player is not null)
+        if (!onHeader && Pressed(Keys.Right) && _player is not null)
         {
             _player.Seek(Math.Min(_player.TotalSeconds, _player.Time + 5));
             ClearNotes();
@@ -180,11 +206,17 @@ public sealed partial class VisualizerGame : Game
         }
 
         if (Pressed(Keys.L))
-        {
-            _autoNext = !_autoNext;
-            _status = _autoNext ? "AUTO NEXT ON" : "AUTO NEXT OFF";
-            _statusTimer = 2f;
-        }
+            ToggleLoop();
+
+        // Media-player keys: X stops, "," and "." are previous and next song.
+        if (Pressed(Keys.X))
+            StopPlayback();
+
+        if (Pressed(Keys.OemComma))
+            PrevTrack();
+
+        if (Pressed(Keys.OemPeriod))
+            NextTrack();
 
         HandleMouse();
     }
@@ -194,6 +226,19 @@ public sealed partial class VisualizerGame : Game
         bool down = _mouse.LeftButton == ButtonState.Pressed;
         bool pressed = down && _prevMouse.LeftButton == ButtonState.Released;
         var p = MouseDesign();
+
+        // Right-click a row: rename / delete menu.
+        if (_mouse.RightButton == ButtonState.Pressed && _prevMouse.RightButton == ButtonState.Released)
+        {
+            foreach (var (rect, index) in _trackHit)
+            {
+                if (!rect.Contains(p))
+                    continue;
+
+                OpenRowMenu(index, p);
+                return;
+            }
+        }
 
         // Volume: click or drag anywhere on the slider (with some vertical slack).
         if (!down && _volumeDragging)
@@ -216,7 +261,10 @@ public sealed partial class VisualizerGame : Game
             if (_prevHit.Contains(p)) { PrevTrack(); return; }
             if (_playHit.Contains(p)) { TogglePause(); return; }
             if (_nextHit.Contains(p)) { NextTrack(); return; }
-            if (_loopHit.Contains(p)) { ToggleLoop(); return; }
+            if (_stopHit.Contains(p)) { StopPlayback(); return; }
+            if (_endLoopHit.Contains(p)) { SetEndMode(EndMode.Loop); return; }
+            if (_endNextHit.Contains(p)) { SetEndMode(EndMode.Next); return; }
+            if (_endStopHit.Contains(p)) { SetEndMode(EndMode.Stop); return; }
             if (_aHit.Contains(p)) { MarkLoopA(); return; }
             if (_bHit.Contains(p)) { MarkLoopB(); return; }
             if (_psgHit.Contains(p)) { ToggleChip(true); return; }
@@ -225,7 +273,7 @@ public sealed partial class VisualizerGame : Game
 
         // Playlist: the wheel scrolls without changing the track; the scrollbar is draggable.
         int wheel = _mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
-        if (wheel != 0 && _playlistRect.Contains(p) && _tracks.Count > _playlistRows)
+        if (wheel != 0 && _playlistRect.Contains(p) && _rows.Count > _playlistRows)
         {
             ScrollPlaylist(wheel > 0 ? -3 : 3);
             return;
@@ -275,9 +323,27 @@ public sealed partial class VisualizerGame : Game
                 return;
             }
 
+            if (_exportButtonHit.Contains(p))
+            {
+                OpenExportDialog();
+                return;
+            }
+
             if (_openFolderHit.Contains(p))
             {
                 OpenFolderDialog();
+                return;
+            }
+
+            if (_collapseAllHit.Contains(p))
+            {
+                SetAllPacks(true);
+                return;
+            }
+
+            if (_expandAllHit.Contains(p))
+            {
+                SetAllPacks(false);
                 return;
             }
         }
@@ -290,8 +356,7 @@ public sealed partial class VisualizerGame : Game
                 if (!rect.Contains(p))
                     continue;
 
-                _selected = index;
-                LoadTrack(index);
+                ActivateRow(index);
                 return;
             }
         }

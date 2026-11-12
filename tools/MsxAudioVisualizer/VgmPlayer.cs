@@ -41,6 +41,16 @@ public sealed class VgmPlayer : IDisposable
     private readonly float[] _decL;
     private readonly float[] _decR;
 
+    // Automatic mix (profile "auto"): per-channel treatment by role, with its own effects bus.
+    private readonly AutoMixProcessor? _autoMix;
+    private readonly float[]? _autoL;
+    private readonly float[]? _autoR;
+    private readonly float[] _autoGain = new float[8];
+    private readonly float[][]? _allBuf;
+
+    /// <summary>What the automatic mix decided for each channel (null for the other profiles).</summary>
+    public AutoMixPlan? AutoMixPlan => _autoMix?.Plan;
+
     private readonly (float L, float R)[] _psgPan = new (float, float)[3];
     private readonly (float L, float R)[] _sccPan = new (float, float)[5];
 
@@ -90,6 +100,14 @@ public sealed class VgmPlayer : IDisposable
         _mixR = new float[capacity];
         _decL = new float[MaxFrames];
         _decR = new float[MaxFrames];
+
+        if (_profile.AutoMix)
+        {
+            _autoMix = new AutoMixProcessor(AutoMixAnalyzer.Analyze(vgm), _oversample, sampleRate);
+            _autoL = new float[MaxFrames];
+            _autoR = new float[MaxFrames];
+            _allBuf = _psgBuf.Concat(_sccBuf).ToArray();
+        }
 
         for (int i = 0; i < 3; i++)
         {
@@ -327,6 +345,7 @@ public sealed class VgmPlayer : IDisposable
         _psg.Reset();
         _scc.Reset();
         _decimator.Reset();
+        _autoMix?.Reset();
         _eventIndex = 0;
         _timeShift = 0;
         _samplePos = (long)Math.Clamp(seconds * 44100.0, 0, _vgm.TotalSamples);
@@ -406,9 +425,10 @@ public sealed class VgmPlayer : IDisposable
         for (int ch = 0; ch < ChannelCount; ch++)
         {
             bool on = ch < 3 ? PsgEnabled : SccEnabled;
-            if (!on || ChannelMuted[ch])
-                continue;
-            if (SoloChannel is int solo && solo != ch)
+            bool audible = on && !ChannelMuted[ch] && !(SoloChannel is int soloed && soloed != ch);
+            _autoGain[ch] = audible ? (ch < 3 ? psgGain : sccGain) : 0f;
+
+            if (_autoMix is not null || !audible)
                 continue;
 
             float[] buf = ch < 3 ? _psgBuf[ch] : _sccBuf[ch - 3];
@@ -429,6 +449,17 @@ public sealed class VgmPlayer : IDisposable
 
         // 4) Decimate to the output rate, fill the scopes.
         _decimator.Process(_mixL, _mixR, inCount, _decL, _decR, frames);
+
+        // Automatic mix: per-role treatment of the chip channels, added to what the audition made.
+        if (_autoMix is not null)
+        {
+            _autoMix.Process(_allBuf!, inCount, frames, _profile.MasterGain, _autoGain, _autoL!, _autoR!);
+            for (int i = 0; i < frames; i++)
+            {
+                _decL[i] += _autoL![i];
+                _decR[i] += _autoR![i];
+            }
+        }
 
         for (int i = 0; i < frames; i++)
         {

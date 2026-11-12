@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Wagenheimer.MsxAudio.Chips;
 using Wagenheimer.MsxAudio.Vgm;
 
@@ -122,6 +123,13 @@ public static class MsxSoundRenderer
         float psgGain = profile.PsgGain;
         float sccGain = profile.SccGain;
 
+        // Automatic mix: the whole song is analysed once, so a loop section is mixed like the rest.
+        AutoMixProcessor? auto = profile.AutoMix
+            ? new AutoMixProcessor(AutoMixAnalyzer.Analyze(vgm), oversample, sampleRate)
+            : null;
+        float[][] allChannels = psgBuf.Concat(sccBuf).ToArray();
+        float[] channelGain = { psgGain, psgGain, psgGain, sccGain, sccGain, sccGain, sccGain, sccGain };
+
         while (renderedFrames < totalFrames)
         {
             int framesThisChunk = Math.Min(chunkOut, totalFrames - renderedFrames);
@@ -157,6 +165,15 @@ public static class MsxSoundRenderer
                 internalPos += segment;
             }
 
+            if (auto is not null)
+            {
+                auto.Process(allChannels, inCount, framesThisChunk, (float)masterGain, channelGain, decL, decR);
+                Array.Copy(decL, 0, outL, renderedFrames, framesThisChunk);
+                Array.Copy(decR, 0, outR, renderedFrames, framesThisChunk);
+                renderedFrames += framesThisChunk;
+                continue;
+            }
+
             for (int i = 0; i < inCount; i++)
             {
                 float l = 0f;
@@ -186,7 +203,7 @@ public static class MsxSoundRenderer
         }
 
         // Post-processing on the whole signal (keeps the filter state continuous).
-        if (profile.HighPassHz > 0)
+        if (profile.HighPassHz > 0 && auto is null)
         {
             var hpL = Biquad.CreateHighPass(sampleRate, profile.HighPassHz, 0.707);
             var hpR = Biquad.CreateHighPass(sampleRate, profile.HighPassHz, 0.707);
@@ -197,7 +214,7 @@ public static class MsxSoundRenderer
             }
         }
 
-        if (profile.LowPassHz > 0)
+        if (profile.LowPassHz > 0 && auto is null)
         {
             var lpL = Biquad.CreateLowPass(sampleRate, profile.LowPassHz, 0.707);
             var lpR = Biquad.CreateLowPass(sampleRate, profile.LowPassHz, 0.707);
@@ -208,7 +225,7 @@ public static class MsxSoundRenderer
             }
         }
 
-        if (profile.ReverbMix > 0)
+        if (profile.ReverbMix > 0 && auto is null)
         {
             var reverb = new StereoReverb(sampleRate);
             reverb.Process(outL, outR, totalFrames, Math.Min(1f, profile.ReverbMix));

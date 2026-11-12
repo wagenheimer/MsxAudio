@@ -13,7 +13,7 @@ namespace Wagenheimer.MsxAudio.Visualizer;
 
 public sealed partial class VisualizerGame : Game
 {
-    private enum DialogKind { None, Folder, Profile, Extract }
+    private enum DialogKind { None, Folder, Profile, Extract, Edit, Export }
 
     private DialogKind _dialog;
 
@@ -53,7 +53,7 @@ public sealed partial class VisualizerGame : Game
 
     // ── Profile dialog ───────────────────────────────────────────────────────────
     private int _profileSel;
-    private readonly Rectangle[] _profileCardHit = new Rectangle[3];
+    private readonly Rectangle[] _profileCardHit = new Rectangle[4];
 
     private const int DialogRows = 21;   // visible rows in each browser list
 
@@ -302,6 +302,8 @@ public sealed partial class VisualizerGame : Game
         ("MONO   4X", "CHANNELS CENTRED   DC CUT 12 HZ", "EXACTLY THE HARDWARE MIX"),
         ("STEREO   4X", "PSG -0.30/+0.30   SCC -0.55/+0.55", "HP 20 HZ   LP 16 KHZ"),
         ("STEREO   8X", "PSG -0.40/+0.40   SCC -0.70/+0.70   REVERB 18%", "HP 25 HZ   LP 17 KHZ   PEAK 0.89"),
+        ("PER-CHANNEL   8X", "LISTENS TO THE NOTES: TUNE, BASS, ARPEGGIOS, PADS AND DRUMS EACH GET THEIR OWN",
+            "LEVEL, PAN, TONE, ECHO AND REVERB, THEN A BUS COMPRESSOR AND LIMITER"),
     };
 
     /// <summary>Recreates the player with another mix, keeping position, mute, solo and chip toggles.</summary>
@@ -362,6 +364,10 @@ public sealed partial class VisualizerGame : Game
             HandleFolderDialogInput();
         else if (_dialog == DialogKind.Extract)
             HandleExtractDialogInput();
+        else if (_dialog == DialogKind.Edit)
+            HandleEditInput();
+        else if (_dialog == DialogKind.Export)
+            HandleExportInput();
     }
 
     private void HandleFolderDialogInput()
@@ -709,6 +715,12 @@ public sealed partial class VisualizerGame : Game
                 break;
             case DialogKind.Extract:
                 DrawExtractDialog();
+                break;
+            case DialogKind.Edit:
+                DrawEditDialog();
+                break;
+            case DialogKind.Export:
+                DrawExportDialog();
                 break;
         }
     }
@@ -1078,7 +1090,7 @@ public sealed partial class VisualizerGame : Game
 
     private void DrawProfileDialog()
     {
-        const int dx = 320, dy = 190, dw = 640, dh = 340;
+        const int dx = 280, dy = 120, dw = 720, dh = 440;
         Panel(dx, dy, dw, dh);
         Rect(dx, dy, dw, 24, PanelColor);
         Text("MIXING PROFILE", dx + 12, dy + 8, Accent);
