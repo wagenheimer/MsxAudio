@@ -76,6 +76,8 @@ public sealed partial class VisualizerGame : Game
     private Rectangle _exMinusHit, _exPlusHit, _exStartHit, _exScanHit, _exCloseHit;
     private Rectangle _exModeCaptureHit, _exModeProfileHit, _exHzHit, _exAutoHit;
     private Rectangle _exRomPasteHit, _exOutPasteHit, _exFmtAutoHit, _exOpenFolderHit;
+    private bool _extractScanning;                   // the running job is FIND ALL SONGS (always a package)
+    private DateTime _extractStarted;               // when the running job began (elapsed time + spinner)
     private string[] _extractInfoLines = Array.Empty<string>();   // what the dialog says about the chosen ROM
     private Rectangle _extractButtonHit;      // header chip
 
@@ -265,6 +267,8 @@ public sealed partial class VisualizerGame : Game
 
         _extractFrame = 0;
         _extractTotalFrames = 1;
+        _extractStarted = DateTime.UtcNow;
+        _extractScanning = scan;
         _extractRunning = true;
         _extractOutput = scan
             ? OutputPath("_songs", ".msxaudio")
@@ -604,7 +608,7 @@ public sealed partial class VisualizerGame : Game
     /// <c>.vgm</c>), a profile or a scan is a whole song list (a package).
     /// </summary>
     private bool ExtractAsPackage() =>
-        _extractMode != ExtractMode.Capture || _extractFormat == 1;
+        _extractMode != ExtractMode.Capture || _extractFormat == 1 || (_extractRunning && _extractScanning);
 
     /// <summary>Fields the Tab key walks through, in screen order.</summary>
     private int[] ExtractFieldOrder() =>
@@ -873,6 +877,25 @@ public sealed partial class VisualizerGame : Game
         return text + "…";
     }
 
+    /// <summary>Eight dots on a circle with a bright head that runs around: "busy".</summary>
+    private void DrawSpinner(int centerX, int centerY, int radius)
+    {
+        const int dots = 8;
+        int head = (int)(Environment.TickCount64 / 90 % dots);
+
+        for (int i = 0; i < dots; i++)
+        {
+            double angle = i * Math.PI * 2 / dots - Math.PI / 2;
+            int x = centerX + (int)Math.Round(Math.Cos(angle) * radius) - 1;
+            int y = centerY + (int)Math.Round(Math.Sin(angle) * radius) - 1;
+
+            // Distance behind the head: 0 = brightest, fading with every step.
+            int behind = (head - i + dots) % dots;
+            float fade = 1f - behind / (float)dots * 0.85f;
+            Rect(x, y, 3, 3, Color.Lerp(Grid, Accent, fade));
+        }
+    }
+
     /// <summary>A path field: shows the end of the path so the file name is visible, with a caret when focused.</summary>
     private void DrawPathField(Rectangle rect, string value, string placeholder, bool focused)
     {
@@ -1092,8 +1115,16 @@ public sealed partial class VisualizerGame : Game
         DrawButton(_exScanHit, "FIND ALL SONGS", false, Accent);
 
         int barX = _exScanHit.Right + 12;
-        int barW = dx + dw - 16 - barX - 46;
         float filled = Math.Clamp(_extractFrame / (float)_extractTotalFrames, 0f, 1f);
+
+        // A spinner (so it is obvious the app is busy even when nothing is logged) and the elapsed time.
+        if (_extractRunning)
+        {
+            DrawSpinner(barX + 8, dy + 280, 7);
+            barX += 24;
+        }
+
+        int barW = dx + dw - 16 - barX - 46;
 
         Rect(barX, dy + 276, barW, 8, Grid);
         Rect(barX, dy + 276, (int)(barW * filled), 8, _extractRunning ? PsgColor : Accent);
@@ -1101,8 +1132,15 @@ public sealed partial class VisualizerGame : Game
         string percent = $"{(int)(filled * 100)}%";
         Text(percent, barX + barW + 10, dy + 276, _extractRunning ? TextColor : Dim);
 
-        if (_extractError is { } error)
+        if (_extractRunning)
+        {
+            TimeSpan elapsed = DateTime.UtcNow - _extractStarted;
+            Text($"WORKING... {(int)elapsed.TotalMinutes:00}:{elapsed.Seconds:00}  (ESC STOPS)", barX, dy + 258, PsgColor);
+        }
+        else if (_extractError is { } error)
+        {
             Text(FitText(error, dw - 190), barX, dy + 258, Warn);
+        }
 
         // Log tail.
         int logTop = dy + 306;
@@ -1203,7 +1241,7 @@ public sealed partial class VisualizerGame : Game
         if (RomFile.IsArchive(path))
         {
             string entry = RomFile.FindCartridge(path) ?? "?";
-            source = "ZIP: USING " + Path.GetFileName(entry) + " INSIDE (UNPACKED AUTOMATICALLY, NOTHING TO EXTRACT BY HAND)";
+            source = "ZIP, UNPACKED AUTOMATICALLY: " + Path.GetFileName(entry);
         }
         else
         {

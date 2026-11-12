@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using Wagenheimer.MsxAudio.Vgm;
 
 namespace Wagenheimer.MsxAudio.Extraction;
@@ -217,10 +218,13 @@ public static class RomSoundScan
         SoundIdMode mode = options.IdMode ?? SoundIdMode.A;
         var scored = new List<(ushort Address, int Score)>();
         var notes = new List<string>();
+        bool routineSearched = routine == 0;
 
         if (routine == 0)
         {
-            var found = Discover(rom, requested, options, log, token);
+            // The routine search is the first third of the bar; the ids fill the rest.
+            var found = Discover(rom, requested, options, log,
+                (done, all) => progress?.Invoke(done * 35 / Math.Max(1, all), 100), token);
 
             if (found is null)
             {
@@ -294,7 +298,7 @@ public static class RomSoundScan
                 produced = machine.PitchWriteCount;
             }
 
-            progress?.Invoke(++done, total);
+            progress?.Invoke(routineSearched ? 35 + ++done * 65 / total : ++done, routineSearched ? 100 : total);
 
             if (produced < options.MinNoteWrites)
                 continue;
@@ -340,7 +344,7 @@ public static class RomSoundScan
                         (loop is { } l ? $", loop {l.Start:0.000}s + {l.Duration:0.000}s" : ""));
         }
 
-        progress?.Invoke(total, total);
+        progress?.Invoke(1, 1);
 
         return new RomScanResult
         {
@@ -449,10 +453,12 @@ public static class RomSoundScan
     /// registers) and returns the first strong one, or the best weak one.
     /// </summary>
     private static (ushort Address, int Bank, SoundIdMode Mode, int Score, List<(ushort Address, int Score)> Scored)?
-        Discover(byte[] rom, RomMapper mapper, RomScanOptions options, Action<string>? log, CancellationToken token)
+        Discover(byte[] rom, RomMapper mapper, RomScanOptions options, Action<string>? log,
+            Action<int, int>? progress, CancellationToken token)
     {
         List<Candidate> candidates = FindCandidateList(rom, mapper, options.MaxCandidates);
-        log?.Invoke($"{candidates.Count} candidate routines write to the sound chips");
+        log?.Invoke($"{candidates.Count} routines may play sound: testing each one with a few ids " +
+                    "(this is the slow part, about a minute)");
 
         // What the game does on its own for the same number of frames: the yardstick for every probe.
         MiniMsx idleMachine = NewMachine(rom, mapper, options);
@@ -472,18 +478,43 @@ public static class RomSoundScan
         SoundIdMode bestMode = SoundIdMode.A;
         int bestScore = 0;
 
+        int probed = 0;
+        int totalProbes = candidates.Count * modes.Length;
+
         foreach (SoundIdMode mode in modes)
         {
-            foreach (Candidate candidate in candidates)
+            // Every probe runs on its own machine, so the candidates are tested side by side; the
+            // scores are collected by index and reported in ranking order, so the result is the same
+            // as testing them one after another.
+            var scores = new int[candidates.Count];
+            var options2 = new ParallelOptions
             {
-                token.ThrowIfCancellationRequested();
+                CancellationToken = token,
+                MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1),
+            };
 
-                int score = Probe(rom, mapper, options, candidate, mode, idle, token);
+            try
+            {
+                Parallel.For(0, candidates.Count, options2, index =>
+                {
+                    scores[index] = Probe(rom, mapper, options, candidates[index], mode, idle, token);
+                    progress?.Invoke(Interlocked.Increment(ref probed), totalProbes);
+                });
+            }
+            catch (AggregateException ex) when (ex.InnerException is OperationCanceledException cancelled)
+            {
+                throw cancelled;
+            }
+
+            for (int index = 0; index < candidates.Count; index++)
+            {
+                int score = scores[index];
                 if (score == 0)
                     continue;
 
-                log?.Invoke($"  probe {candidate.Address:X4}{(candidate.Bank >= 0 ? $"@{candidate.Bank}" : "")} " +
-                            $"({mode}, {candidate.Sites} callers): {score} pitch writes");
+                Candidate candidate = candidates[index];
+                log?.Invoke($"  routine {candidate.Address:X4}{(candidate.Bank >= 0 ? $" (bank {candidate.Bank})" : "")} " +
+                            $"answers with id in {mode}: {score / 1000} distinct sounds ({candidate.Sites} callers)");
                 scored.Add((candidate.Address, score));
 
                 if (score > bestScore)
