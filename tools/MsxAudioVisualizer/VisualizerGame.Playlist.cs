@@ -10,6 +10,7 @@ using Microsoft.Xna.Framework.Audio;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using Wagenheimer.MsxAudio.Mixing;
+using Wagenheimer.MsxAudio.Songs;
 using Wagenheimer.MsxAudio.Vgm;
 
 namespace Wagenheimer.MsxAudio.Visualizer;
@@ -33,6 +34,9 @@ public sealed partial class VisualizerGame : Game
     private Rectangle _playlistScrollThumb;
     private bool _playlistScrollDragging;
     private Rectangle _openFolderHit;
+
+    // Open .msxaudio packages (one per file), so switching songs inside a package is instant.
+    private readonly Dictionary<string, PackageCache> _packages = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Scans <paramref name="dir"/> in the background (recursive or not) and replaces the playlist
@@ -151,14 +155,45 @@ public sealed partial class VisualizerGame : Game
             return;
 
         _selected = index;
-        LoadFile(_tracks[index].Path);
+        VgmEntry entry = _tracks[index];
+        LoadFile(entry.Path, songId: entry.SongId, displayName: entry.Name);
     }
 
-    private void LoadFile(string path, bool rescan = true)
+    /// <summary>
+    /// Loads a VGM from disk, or one song out of a <c>.msxaudio</c> package. Packages are cached, so
+    /// switching songs inside the same package does not re-read the file.
+    /// </summary>
+    private VgmFile LoadVgm(string path, string? songId)
+    {
+        if (!Path.GetExtension(path).Equals(".msxaudio", StringComparison.OrdinalIgnoreCase))
+            return VgmFile.Load(path);
+
+        DateTime stamp = File.GetLastWriteTimeUtc(path);
+
+        if (!_packages.TryGetValue(path, out PackageCache? cache) || cache.Stamp != stamp)
+        {
+            if (_packages.Remove(path, out PackageCache? previous))
+                previous.Library.Dispose();
+
+            cache = new PackageCache(MsxAudioLibrary.Load(path), stamp);
+            _packages[path] = cache;
+        }
+
+        MsxAudioSong song = cache.Library.Find(songId ?? string.Empty)
+                            ?? cache.Library.Songs.Concat(cache.Library.Clips).FirstOrDefault()
+                            ?? throw new InvalidDataException("the package has no songs");
+
+        return cache.Library.LoadVgm(song);
+    }
+
+    /// <summary>An open package, kept for the playlist (disposed on exit).</summary>
+    private sealed record PackageCache(MsxAudioLibrary Library, DateTime Stamp);
+
+    private void LoadFile(string path, bool rescan = true, string? songId = null, string? displayName = null)
     {
         try
         {
-            var vgm = VgmFile.Load(path);
+            VgmFile vgm = LoadVgm(path, songId);
             _player?.Dispose();
             _sound?.Dispose();
 
@@ -211,8 +246,8 @@ public sealed partial class VisualizerGame : Game
                     _listSelectPath = path;
             }
 
-            Console.WriteLine($"[MSXScope] loaded {path} events={vgm.Events.Count} len={vgm.TotalSeconds:0.0}s");
-            _status = "LOADED " + Path.GetFileName(path);
+            Console.WriteLine($"[MSXScope] loaded {path}{(songId is null ? "" : "#" + songId)} events={vgm.Events.Count} len={vgm.TotalSeconds:0.0}s");
+            _status = "LOADED " + (displayName ?? Path.GetFileName(path));
             ClearNotes();
             _statusTimer = 3f;
             Array.Clear(_bars);
@@ -324,6 +359,17 @@ public sealed partial class VisualizerGame : Game
                 if (folder.Length > 9)
                     folder = folder[..9];
                 Text(folder, x + 12 + (maxName + 2) * 6, rowY, Dim);
+            }
+            else if (entry.SongId is not null)
+            {
+                // Song from a .msxaudio package: show which package it came from.
+                string source = Path.GetFileNameWithoutExtension(entry.Source ?? string.Empty).ToUpperInvariant();
+                int room = Math.Max(0, (w - 60) / 6 - maxName - 2);
+                if (source.Length > room)
+                    source = room > 1 ? source[..(room - 1)] + "…" : string.Empty;
+
+                if (source.Length > 0)
+                    Text(source, x + 12 + (maxName + 2) * 6, rowY, Dim);
             }
 
             if (entry.Seconds is double seconds)

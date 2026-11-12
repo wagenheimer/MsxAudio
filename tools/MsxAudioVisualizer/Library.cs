@@ -7,7 +7,15 @@ using System.Threading;
 namespace Wagenheimer.MsxAudio.Visualizer;
 
 /// <summary>One VGM found by <see cref="Library"/>.</summary>
-public sealed record VgmEntry(string Path, string Folder, string Name, double? Seconds, long Size);
+/// <param name="Path">File on disk (a <c>.vgm</c> or a <c>.msxaudio</c> package).</param>
+/// <param name="Folder">Folder holding the file.</param>
+/// <param name="Name">Display name (the song name inside a package).</param>
+/// <param name="Seconds">Duration when known.</param>
+/// <param name="Size">File size in bytes.</param>
+/// <param name="SongId">Song id inside the package (null for a plain VGM).</param>
+/// <param name="Source">Package file name, for the playlist (null for a plain VGM).</param>
+public sealed record VgmEntry(string Path, string Folder, string Name, double? Seconds, long Size,
+    string? SongId = null, string? Source = null);
 
 /// <summary>Result of a folder scan.</summary>
 public sealed class ScanResult
@@ -81,6 +89,15 @@ public static class Library
                     token.ThrowIfCancellationRequested();
                     result.Files.Add(Entry(file));
                 }
+
+                if (pattern == "*.vgm")
+                {
+                    foreach (string file in Directory.EnumerateFiles(root, "*.msxaudio"))
+                    {
+                        token.ThrowIfCancellationRequested();
+                        AddPackage(result, file);
+                    }
+                }
             }
             else
             {
@@ -117,6 +134,15 @@ public static class Library
                             if (result.Files.Count % 32 == 0)
                                 progress?.Invoke(result.Files.Count);
                         }
+
+                        if (pattern == "*.vgm")
+                        {
+                            foreach (string file in Directory.EnumerateFiles(dir, "*.msxaudio"))
+                            {
+                                token.ThrowIfCancellationRequested();
+                                AddPackage(result, file);
+                            }
+                        }
                     }
                     catch (Exception)
                     {
@@ -152,6 +178,47 @@ public static class Library
             Path.GetFileNameWithoutExtension(file),
             TryReadSeconds(file),
             size);
+    }
+
+    /// <summary>
+    /// Adds one entry per song/effect of a <c>.msxaudio</c> package. Only the manifest is read, so
+    /// listing a folder stays cheap even with many packages.
+    /// </summary>
+    private static void AddPackage(ScanResult result, string file)
+    {
+        long size = 0;
+        try { size = new FileInfo(file).Length; } catch (Exception) { }
+
+        string folder = Path.GetDirectoryName(file) ?? string.Empty;
+        string source = Path.GetFileName(file);
+
+        try
+        {
+            using var archive = System.IO.Compression.ZipFile.OpenRead(file);
+            var manifestEntry = archive.GetEntry("manifest.json");
+            if (manifestEntry is null)
+                return;
+
+            using var stream = manifestEntry.Open();
+            using var reader = new StreamReader(stream);
+            var manifest = System.Text.Json.JsonSerializer.Deserialize<Songs.MsxAudioManifest>(
+                reader.ReadToEnd(),
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (manifest is null)
+                return;
+
+            foreach (var song in manifest.Songs.Concat(manifest.Clips))
+            {
+                result.Files.Add(new VgmEntry(
+                    file, folder, song.Name.Length > 0 ? song.Name : song.Id,
+                    song.Seconds > 0 ? song.Seconds : null, size, song.Id, source));
+            }
+        }
+        catch (Exception)
+        {
+            // not a package / locked file: ignore it instead of breaking the scan
+        }
     }
 
     /// <summary>

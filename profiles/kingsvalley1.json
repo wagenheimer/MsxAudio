@@ -1,0 +1,41 @@
+{
+  "name": "King's Valley",
+  "machine": "C-BIOS_MSX1",
+  "romType": "linear",
+  "soundCallAddress": 31401,
+  "playerAddress": 31542,
+  "resetAddresses": [ 57362, 57374, 57388 ],
+  "idMask": 128,
+  "stopId": 32,
+  "ids": [ 11, 13, 15, 17, 20, 23, 26, 29, 3, 4, 5, 6, 7, 8, 9, 10 ],
+  "musicIds": [ 11, 13, 15, 17, 20, 23, 26, 29 ],
+  "secondsPerId": 6,
+  "secondsPerSong": 60,
+  "secondsById": {
+    "11": 90,
+    "17": 40,
+    "20": 40,
+    "23": 40,
+    "26": 30,
+    "29": 30
+  },
+  "names": {
+    "3": "door_spin",
+    "4": "pickup",
+    "5": "pickaxe",
+    "6": "knife_throw",
+    "7": "mummy_appear",
+    "8": "mummy_hit",
+    "9": "gem",
+    "10": "extra_life",
+    "11": "ingame",
+    "13": "door_close",
+    "15": "pyramid_bell",
+    "17": "map_fanfare",
+    "20": "stage_clear",
+    "23": "start_game",
+    "26": "game_over",
+    "29": "death"
+  },
+  "comment": "King's Valley (1985, RC-727). setMusic @ 0x7AA9 takes the id in A (0x80 = music stream); the per-frame player is 0x7B36 and can run without the game. Music ids start at 11 (2 channels) and 17/20/23/26/29 use 3 (the table at 0x7CF5 holds one pointer per channel). Reset addresses 0xE012/0xE01E/0xE02C are the per-channel current-song bytes; the driver ignores a lower-priority song, so they must be cleared first. Mapping taken from the annotated disassembly (github.com/GuillianSeed/Kings-Valley)."
+}

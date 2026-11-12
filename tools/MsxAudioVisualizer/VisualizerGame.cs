@@ -244,6 +244,13 @@ public sealed partial class VisualizerGame : Game
         Window.TextInput += (_, e) => OnExtractTextInput(e.Character);
 
         Exiting += (_, _) => SaveSettings();
+        Exiting += (_, _) =>
+        {
+            foreach (PackageCache package in _packages.Values)
+                package.Library.Dispose();
+
+            _packages.Clear();
+        };
 
         if (!string.IsNullOrWhiteSpace(_recordPath))
         {

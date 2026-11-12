@@ -49,6 +49,27 @@ public sealed class RomExtractionProfile
     /// <summary>Address of the "play sound A" routine (CPU).</summary>
     public int SoundCallAddress { get; set; } = 0x432E;
 
+    /// <summary>
+    /// Address of the per-frame sound player, when the driver can be run alone (no game logic).
+    /// </summary>
+    /// <remarks>
+    /// Many stream-based drivers need nothing from the game: setting the channels idle, calling the
+    /// "play sound" routine and then stepping this routine at 60 Hz is enough. That is faster and
+    /// deterministic (no game state to interfere), and it is what makes King's Valley 1 extractable:
+    /// its handler also runs the whole game, which overwrites the song on the first state change.
+    /// Leave 0 to run the game's interrupt hooks instead.
+    /// </remarks>
+    public int PlayerAddress { get; set; }
+
+    /// <summary>
+    /// RAM bytes cleared before each capture (usually each channel's current-song byte).
+    /// </summary>
+    /// <remarks>The driver's priority gate (lower id wins) would otherwise block a new song.</remarks>
+    public List<int> ResetAddresses { get; set; } = new();
+
+    /// <summary>Bits OR-ed into the id when calling (e.g. <c>0x80</c> = "music stream" in King's Valley 1).</summary>
+    public int IdMask { get; set; }
+
     /// <summary>Id that stops every sound (used before each capture).</summary>
     public int StopId { get; set; } = 1;
 

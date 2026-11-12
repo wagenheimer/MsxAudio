@@ -182,6 +182,8 @@ In the **piano** view:
 | <img src="docs/media/profiles.png" width="100%"> | <img src="docs/media/help.png" width="100%"> |
 | **Extract from ROM** (any cartridge, no profile) | **Cartridge picker** (`*.rom`, breadcrumb) |
 | <img src="docs/media/extract.png" width="100%"> | <img src="docs/media/rom-picker.png" width="100%"> |
+| **A `.msxaudio` package in the playlist** (King's Valley 1) | |
+| <img src="docs/media/extract-result.png" width="100%"> | |
 
 What you see:
 
@@ -353,6 +355,35 @@ in 30 s, notes visible in the piano roll). Two bugs made this possible: the boot
 the hook used to be *restarted* when a frame overran the instruction budget instead of continuing —
 KV1 sets a re-entry guard in its handler, so restarting it left the game frozen at the title.
 `extract` (openMSX) remains the bit-exact reference.
+
+#### Running only the sound driver (King's Valley 1)
+
+Some cartridges run their **whole game inside the interrupt handler**, so stepping the game makes it
+replace whatever song the extractor started. For those, a profile can name the **per-frame sound
+player** (`playerAddress`): the extractor then runs *only the driver* — no game logic at all.
+
+```bash
+MsxAudioTool extract-direct kv1.rom kingsvalley1.msxaudio --profile profiles/kingsvalley1.json
+# ingame       id 11   90,00s  13512 writes  loop 0,000s + 12,800s
+# start_game   id 23   40,00s   3039 writes  loop 4,683s + 0,833s
+# ... 8 songs + 8 effects
+```
+
+`profiles/kingsvalley1.json` is documented from the annotated disassembly
+([GuillianSeed/Kings-Valley](https://github.com/GuillianSeed/Kings-Valley)):
+
+| Field | King's Valley 1 |
+| :--- | :--- |
+| `soundCallAddress` | `0x7AA9` — `setMusic`: the id goes in `A`, `0x80` = music stream (hence `idMask: 128`) |
+| `playerAddress` | `0x7B36` — per-frame player, callable on its own |
+| `resetAddresses` | `0xE012`, `0xE01E`, `0xE02C` — each channel's current-song byte (the driver ignores a song with a higher id, so they must be cleared) |
+| ids | `11` = in-game BGM (2 channels), `17/20/23/26/29` = 3 channels, `3…10` = effects |
+
+The in-game theme comes out as a **12.8 s loop** with a constant level (RMS 0.040 across the whole
+loop), which is what the player shows in the screenshot above.
+
+Packages are first-class in the player now: dropping a `.msxaudio` on the window (or opening it from
+the folder browser) lists every song by name, one playlist row each.
 
 ## CLI
 

@@ -57,11 +57,29 @@ public static class DirectRomExtractor
             machine.TriggerSound((ushort)profile.SoundCallAddress, profile.StopId);
             for (int i = 0; i < 3; i++) machine.Frame();
 
+            // Stream drivers gate by id (lower wins) and remember the song per channel: clearing the
+            // channel state is what makes the next song start even after a higher-priority one.
+            foreach (int address in profile.ResetAddresses)
+                machine.Write((ushort)address, 0x00);
+
             machine.ResetCapture();
-            machine.TriggerSound((ushort)profile.SoundCallAddress, id);
+            machine.TriggerSound((ushort)profile.SoundCallAddress, id | profile.IdMask);
 
             int frames = Math.Max(1, (int)Math.Round(duration * 60));
-            for (int i = 0; i < frames; i++) machine.Frame();
+
+            for (int i = 0; i < frames; i++)
+            {
+                // Sound-only mode: step the driver itself, so the game's logic cannot replace the song.
+                if (profile.PlayerAddress != 0)
+                {
+                    machine.CallAddress((ushort)profile.PlayerAddress);
+                    machine.Advance();
+                }
+                else
+                {
+                    machine.Frame();
+                }
+            }
 
             var vgm = machine.BuildVgm($"id{id:00}", frames * 735);
             bool music = profile.MusicIds.Contains(id);

@@ -141,9 +141,22 @@ internal static class Program
 
     private static int ExtractDirect(string[] args)
     {
-        if (args.Length < 2) return Usage("extract-direct <rom> <out.msxaudio> --profile profile.json");
+        if (args.Length < 2) return Usage("extract-direct <rom> <out.msxaudio> --profile profile.json [--ids 1,2,3]");
 
         var profile = LoadProfile(args);
+
+        // Optional id filter, handy while authoring a profile.
+        if (Value(args, "--ids") is { Length: > 0 } ids)
+        {
+            var wanted = new List<int>();
+            foreach (string part in ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                if (int.TryParse(part, out int id))
+                    wanted.Add(id);
+
+            if (wanted.Count > 0)
+                profile.Ids = wanted;
+        }
+
         var options = new RomExtractionOptions { RomPath = args[0], Profile = profile };
 
         var result = DirectRomExtractor.Extract(options, Console.WriteLine);

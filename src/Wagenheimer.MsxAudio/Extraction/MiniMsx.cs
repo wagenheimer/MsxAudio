@@ -298,6 +298,28 @@ public sealed class MiniMsx
         Call(routine, maxInstructions);
     }
 
+    /// <summary>
+    /// Calls a routine with registers preset. Some drivers do not take the song id in <c>A</c>:
+    /// they are started by a routine that reads game state from <c>HL</c> or from memory, so a
+    /// curated profile needs to set the registers (and RAM) first.
+    /// </summary>
+    /// <param name="routine">Address to call.</param>
+    /// <param name="a">Value for <c>A</c>.</param>
+    /// <param name="hl">Value for <c>HL</c>.</param>
+    /// <param name="de">Value for <c>DE</c>.</param>
+    /// <param name="bc">Value for <c>BC</c>.</param>
+    /// <param name="maxInstructions">Instruction budget.</param>
+    public void CallRoutine(ushort routine, byte a = 0, ushort hl = 0, ushort de = 0, ushort bc = 0,
+        int maxInstructions = 200_000)
+    {
+        var main = (MainZ80Registers)_cpu.Registers;
+        main.A = a;
+        main.HL = unchecked((short)hl);
+        main.DE = unchecked((short)de);
+        main.BC = unchecked((short)bc);
+        Call(routine, maxInstructions);
+    }
+
     /// <summary>Presses or releases a key in the matrix (row 0..8, mask bit 0..7; row 0x0F = joystick).</summary>
     public void PressKey(int row, int mask, bool pressed)
     {
@@ -333,7 +355,15 @@ public sealed class MiniMsx
     {
         _events.Clear();
         _sample = 0;
+        PitchWriteCount = 0;
     }
+
+    /// <summary>
+    /// Advances the capture clock without running the machine. Used when a driver is stepped directly
+    /// (<see cref="CallAddress"/>) instead of through <see cref="Frame"/>.
+    /// </summary>
+    /// <param name="samples">Samples at 44100 Hz (one frame is 735).</param>
+    public void Advance(int samples = 735) => _sample += samples;
 
     /// <summary>Builds a VGM from the captured register writes.</summary>
     public VgmFile BuildVgm(string name, int totalSamples = 0) =>
@@ -341,6 +371,18 @@ public sealed class MiniMsx
 
     /// <summary>Number of register writes captured since <see cref="ResetCapture"/>.</summary>
     public int EventCount => _events.Count;
+
+    /// <summary>Captured writes (diagnostics: lets a caller inspect what the driver wrote).</summary>
+    public IReadOnlyList<VgmEvent> CapturedEvents => _events;
+
+    /// <summary>
+    /// Pitch writes captured since <see cref="ResetCapture"/> (PSG tone period, SCC frequency and
+    /// key-on). Cheap "is anything playing?" test for the id scan, without building a VGM.
+    /// </summary>
+    public int PitchWriteCount { get; private set; }
+
+    /// <summary>Calls an address directly (diagnostics; the game's interrupt model is bypassed).</summary>
+    public void CallAddress(ushort address, int maxInstructions = 50_000) => Call(address, maxInstructions);
 
     /// <summary>Runs a routine with a return-address sentinel and an instruction budget.</summary>
     private void Call(ushort address, int maxInstructions)
@@ -361,10 +403,18 @@ public sealed class MiniMsx
         }
     }
 
+    /// <summary>
+    /// Called with the program counter before every instruction (diagnostics). Set from a probe to
+    /// follow a driver's flow without a debugger.
+    /// </summary>
+    public Action<ushort>? PcTrace { get; set; }
+
     /// <summary>One instruction (or one emulated BIOS entry) on <paramref name="cpu"/>.</summary>
     private void Step(Z80Processor cpu)
     {
         var registers = (Z80Registers)cpu.Registers;
+
+        PcTrace?.Invoke(registers.PC);
 
         if (registers.PC == 0x0030)
         {
@@ -377,6 +427,10 @@ public sealed class MiniMsx
             // BIOS WRTPSG: A = register, E = value
             var main = (MainZ80Registers)registers;
             _events.Add(new VgmEvent(_sample, VgmEventKind.Psg, main.A, main.E, 0));
+
+            if (main.A <= 5)
+                PitchWriteCount++;
+
             ReturnFromBios(registers);
             return;
         }
@@ -501,6 +555,9 @@ public sealed class MiniMsx
         }
 
         _events.Add(new VgmEvent(_sample, VgmEventKind.Psg, _psgLatch, value, 0));
+
+        if (_psgLatch <= 5)
+            PitchWriteCount++;
     }
 
     /// <summary>Konami SCC register write (memory mapped at 0x9800-0x98FF).</summary>
@@ -509,11 +566,17 @@ public sealed class MiniMsx
         if (register < 0x80)
             _events.Add(new VgmEvent(_sample, VgmEventKind.Scc, 0, (byte)register, value));
         else if (register < 0x8A)
+        {
             _events.Add(new VgmEvent(_sample, VgmEventKind.Scc, 1, (byte)(register - 0x80), value));
+            PitchWriteCount++;
+        }
         else if (register < 0x8F)
             _events.Add(new VgmEvent(_sample, VgmEventKind.Scc, 2, (byte)(register - 0x8A), value));
         else if (register == 0x8F)
+        {
             _events.Add(new VgmEvent(_sample, VgmEventKind.Scc, 3, 0, value));
+            PitchWriteCount++;
+        }
         else if (register >= 0xE0)
             _events.Add(new VgmEvent(_sample, VgmEventKind.Scc, 0, (byte)(0x60 + (register - 0xE0)), value));
     }
