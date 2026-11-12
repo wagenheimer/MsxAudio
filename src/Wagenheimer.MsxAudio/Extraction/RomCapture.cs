@@ -166,6 +166,15 @@ public sealed class RomCaptureResult
     /// <summary>Why the capture may be silent or incomplete (unsupported chips, BIOS stubs, boot warnings).</summary>
     public IReadOnlyList<string> Diagnosis { get; init; } = Array.Empty<string>();
 
+    /// <summary>The game wrote to MSX-MUSIC (YM2413): this extractor does not record it, openMSX does.</summary>
+    public bool UsesFm { get; init; }
+
+    /// <summary>The game wrote to MSX-AUDIO (Y8950).</summary>
+    public bool UsesY8950 { get; init; }
+
+    /// <summary>The game wrote to the SCC+ registers.</summary>
+    public bool UsesSccPlus { get; init; }
+
     /// <summary>Refresh rate used (50 or 60).</summary>
     public double RefreshRate { get; init; } = 60;
 }
@@ -309,6 +318,9 @@ public static class RomCapture
             Loop = loop,
             NoteWrites = noteWrites,
             Diagnosis = diagnosis,
+            UsesFm = machine.FmWrites > 0,
+            UsesY8950 = machine.Y8950Writes > 0,
+            UsesSccPlus = machine.SccPlusWrites > 200,
             RefreshRate = machine.RefreshRate,
         };
     }

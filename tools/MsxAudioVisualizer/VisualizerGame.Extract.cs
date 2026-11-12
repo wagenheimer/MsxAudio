@@ -112,8 +112,19 @@ public sealed partial class VisualizerGame : Game
             _extractMode = ExtractMode.Profile;
         }
 
-        _extractField = _extractRom.Length == 0 ? 0 : 1;
+        _extractField = 0;
         _extractError = null;
+        _wizardStep = 0;
+
+        // Docs/CI: jump straight to a step (MSXAUDIO_WIZARD_STEP=1 or 2).
+        if (int.TryParse(Environment.GetEnvironmentVariable("MSXAUDIO_WIZARD_STEP"), out int wanted) && wanted is 1 or 2)
+        {
+            RefreshExtractInfo();
+            _wizardStep = wanted;
+            _extractField = wanted == 2 ? 1 : 0;
+            if (wanted == 1)
+                PrepareMethodStep();
+        }
 
         if (_extractOutAuto)
             _extractOutDir = DefaultOutDir(_extractRom);
@@ -242,6 +253,20 @@ public sealed partial class VisualizerGame : Game
             return;
         }
 
+        if (_extractMethod == 1 && _omsxPath is null)
+        {
+            _extractError = "OPENMSX IS NOT INSTALLED: GO BACK AND INSTALL IT, OR PICK THE BUILT-IN EXTRACTOR";
+            return;
+        }
+
+        if (scan && _extractMethod == 1)
+        {
+            _extractError = "FIND ALL SONGS NEEDS THE BUILT-IN EXTRACTOR";
+            return;
+        }
+
+        _wizardStep = 2;
+
         if (!scan && _extractMode == ExtractMode.Profile && !File.Exists(_extractProfile))
         {
             _extractError = "CHOOSE A PROFILE .JSON (OR SWITCH TO CAPTURE)";
@@ -260,6 +285,8 @@ public sealed partial class VisualizerGame : Game
         bool pal = _extractPal;
         bool autoPress = _extractAutoPress;
         ExtractMode mode = _extractMode;
+        int method = _extractMethod;
+        string? omsxPath = _omsxPath;
 
         _extractError = null;
         lock (_extractLogLock)
@@ -293,6 +320,13 @@ public sealed partial class VisualizerGame : Game
             try
             {
                 double refresh = pal ? 50 : 60;
+
+                if (method == 1 && omsxPath is not null)
+                {
+                    return mode == ExtractMode.Profile
+                        ? RunOpenMsxProfileJob(rom, omsxPath, profilePath, token, output)
+                        : RunOpenMsxCaptureJob(rom, omsxPath, keys, seconds, package, autoPress, token, output);
+                }
 
                 if (scan)
                     return RunScanJob(rom, mapperIndex, profilePath, psg, scc, refresh, token, output);
@@ -553,7 +587,7 @@ public sealed partial class VisualizerGame : Game
     /// <summary>Text typed into the dialog (wired to <c>Window.TextInput</c> in Initialize).</summary>
     private void OnExtractTextInput(char character)
     {
-        if (_dialog != DialogKind.Extract || _extractRunning || char.IsControl(character))
+        if (_dialog != DialogKind.Extract || _extractRunning || char.IsControl(character) || _wizardStep == 1)
             return;
 
         switch (_extractField)
@@ -668,11 +702,15 @@ public sealed partial class VisualizerGame : Game
 
         if (Pressed(Keys.Enter) && !_extractRunning)
         {
-            StartExtraction(scan: false);
+            if (_wizardStep < 2)
+                GoNext();
+            else
+                StartExtraction(scan: false);
+
             return;
         }
 
-        if (Pressed(Keys.Tab))
+        if (Pressed(Keys.Tab) && _wizardStep == 2)
         {
             int[] order = ExtractFieldOrder();
             int at = Array.IndexOf(order, _extractField);
@@ -719,6 +757,9 @@ public sealed partial class VisualizerGame : Game
 
             return;
         }
+
+        if (HandleWizardClick(p))
+            return;
 
         if (_exRomHit.Contains(p))
         {
@@ -931,44 +972,49 @@ public sealed partial class VisualizerGame : Game
     private void DrawExtractDialog()
     {
         const int dx = 220, dy = 80, dw = 840, dh = 560;
+        ClearExtractHits();
         Panel(dx, dy, dw, dh);
         Rect(dx, dy, dw, 24, PanelColor);
-        Text("EXTRACT FROM ROM", dx + 12, dy + 8, Accent);
+        Text("EXPORT MUSIC FROM A ROM", dx + 12, dy + 8, Accent);
 
         _exCloseHit = new Rectangle(dx + dw - 24, dy + 4, 16, 16);
         DrawButton(_exCloseHit, "X", false, Warn);
 
+        DrawWizardStepper(dx, dy, dw);
+
+        switch (_wizardStep)
+        {
+            case 0:
+                DrawStepRom(dx, dy, dw, dh);
+                return;
+            case 1:
+                DrawStepMethod(dx, dy, dw, dh);
+                return;
+        }
+
+        DrawStepExtract(dx, dy, dw, dh);
+    }
+
+    /// <summary>Step 3: what to extract, the options, and the run (progress and log).</summary>
+    private void DrawStepExtract(int dx, int dy, int dw, int dh)
+    {
         int labelX = dx + 16;
         int fieldX = dx + 92;
         int fieldW = dw - 92 - 116;
-
-        // ROM.
-        Text("ROM", labelX, dy + 44, Dim);
-
-        // The path is always shown whole (its tail, so the file name stays visible) and is editable:
-        // type it, paste it (Ctrl+V or PASTE; a file copied in Explorer works too) or BROWSE.
         int pathW = fieldW - 66;
-        _exRomHit = new Rectangle(fieldX, dy + 38, pathW, 18);
-        DrawPathField(_exRomHit, _extractRom, "(PASTE OR TYPE THE ROM / ZIP PATH, OR BROWSE)", _extractField == 0);
+        bool omsx = _extractMethod == 1;
 
-        _exRomPasteHit = new Rectangle(fieldX + pathW + 6, dy + 38, 60, 18);
-        DrawButton(_exRomPasteHit, "PASTE", false, Accent);
+        Text("STEP 3 OF 3 - CHOOSE WHAT TO EXTRACT, THEN PRESS THE BUTTON BELOW THE OPTIONS", dx + 300, dy + 36, Accent);
 
-        _exBrowseHit = new Rectangle(fieldX + fieldW + 8, dy + 38, 84, 18);
-        DrawButton(_exBrowseHit, "BROWSE", false, Accent);
+        // The cartridge and the method chosen so far, with a way back to change either.
+        Text("ROM", labelX, dy + 64, Dim);
+        Text(FitTextLeft(_extractRom.ToUpperInvariant(), fieldW), fieldX, dy + 64, TextColor);
+        _exChangeRomHit = new Rectangle(fieldX + fieldW + 8, dy + 60, 84, 16);
+        DrawButton(_exChangeRomHit, "CHANGE", false, Accent);
 
-        // What the ROM turned out to be: where it came from (a .zip is unpacked by itself), size,
-        // mapper and how it was chosen, header, hash, and what to do next. Refreshed on path changes.
-        RefreshExtractInfo();
-        bool romMissing = _extractRom.Length > 0 && !File.Exists(_extractRom);
-        if (romMissing)
-            Text("FILE NOT FOUND", fieldX, dy + 60, Warn);
-        else if (_extractInfoError is not null)
-            Text(FitText(_extractInfoError.ToUpperInvariant(), fieldW + 92), fieldX, dy + 60, Warn);
-        else
-            for (int i = 0; i < _extractInfoLines.Length; i++)
-                Text(FitText(_extractInfoLines[i], fieldW + 92), fieldX, dy + 60 + i * 11,
-                    i == 2 ? Accent : Dim);
+        Text("METHOD", labelX, dy + 80, Dim);
+        Text(omsx ? "OPENMSX - EXACT, EVERY CHIP" : "BUILT-IN EXTRACTOR (EXPERIMENTAL) - PSG AND SCC",
+            fieldX, dy + 80, omsx ? SccColor : Accent);
 
         // Mode: capture (any ROM) or profile (curated song list).
         Text("MODE", labelX, dy + 102, Dim);
@@ -1001,8 +1047,15 @@ public sealed partial class VisualizerGame : Game
 
         // Mapper + duration.
         Text("MAPPER", labelX, dy + 126, Dim);
-        _exMapperHit = new Rectangle(fieldX, dy + 120, 150, 18);
-        DrawButton(_exMapperHit, ExtractMappers[_extractMapper].Label, true, Accent);
+        if (omsx)
+        {
+            Text("AUTO (OPENMSX KNOWS THE CARTRIDGE)", fieldX, dy + 126, Dim);
+        }
+        else
+        {
+            _exMapperHit = new Rectangle(fieldX, dy + 120, 150, 18);
+            DrawButton(_exMapperHit, ExtractMappers[_extractMapper].Label, true, Accent);
+        }
 
         int secondsX = fieldX + 190;
         Text("SECONDS", secondsX, dy + 126, Dim);
@@ -1017,10 +1070,13 @@ public sealed partial class VisualizerGame : Game
 
         // 60 Hz (NTSC) or 50 Hz (PAL): the tempo of the whole capture. Auto-press: tap fire and the
         // space bar every few seconds so the game leaves its title/menu screens by itself.
-        _exHzHit = new Rectangle(secondsX + 160, dy + 120, 58, 18);
-        DrawButton(_exHzHit, _extractPal ? "50 HZ" : "60 HZ", true, Accent);
+        if (!omsx)
+        {
+            _exHzHit = new Rectangle(secondsX + 160, dy + 120, 58, 18);
+            DrawButton(_exHzHit, _extractPal ? "50 HZ" : "60 HZ", true, Accent);
+        }
 
-        _exAutoHit = new Rectangle(secondsX + 224, dy + 120, 118, 18);
+        _exAutoHit = new Rectangle(secondsX + (omsx ? 160 : 224), dy + 120, 118, 18);
         DrawButton(_exAutoHit, "AUTO-PRESS", _extractAutoPress && capture, capture ? Accent : Dim);
 
         // Capture: key script. Profile: what the profile holds.
@@ -1086,11 +1142,18 @@ public sealed partial class VisualizerGame : Game
         int chipsX = fieldX + 420;
         Text("CHIPS", chipsX - 52, dy + 230, Dim);
 
-        _exPsgHit = new Rectangle(chipsX, dy + 224, 44, 18);
-        DrawButton(_exPsgHit, "PSG", _extractPsg, PsgColor);
+        if (omsx)
+        {
+            Text("ALL CHIPS", chipsX, dy + 230, SccColor);
+        }
+        else
+        {
+            _exPsgHit = new Rectangle(chipsX, dy + 224, 44, 18);
+            DrawButton(_exPsgHit, "PSG", _extractPsg, PsgColor);
 
-        _exSccHit = new Rectangle(chipsX + 48, dy + 224, 44, 18);
-        DrawButton(_exSccHit, "SCC", _extractScc, SccColor);
+            _exSccHit = new Rectangle(chipsX + 48, dy + 224, 44, 18);
+            DrawButton(_exSccHit, "SCC", _extractScc, SccColor);
+        }
 
         // The file that will be written, so the whole path is visible without editing it.
         string fileName = _extractRunning && _extractOutput is { Length: > 0 } running
@@ -1111,10 +1174,19 @@ public sealed partial class VisualizerGame : Game
             _extractRunning ? "STOP" : _extractMode == ExtractMode.Profile ? "EXTRACT ALL" : "CAPTURE",
             _extractRunning, _extractRunning ? Warn : Accent);
 
-        _exScanHit = new Rectangle(fieldX + 118, dy + 270, 152, 20);
-        DrawButton(_exScanHit, "FIND ALL SONGS", false, Accent);
+        if (omsx)
+        {
+            // Finding the ids needs the built-in scanner: openMSX records, it does not search.
+            Text("FIND ALL SONGS: BUILT-IN ONLY", fieldX + 118, dy + 276, Dim);
+            _exScanHit = Rectangle.Empty;
+        }
+        else
+        {
+            _exScanHit = new Rectangle(fieldX + 118, dy + 270, 152, 20);
+            DrawButton(_exScanHit, "FIND ALL SONGS", false, Accent);
+        }
 
-        int barX = _exScanHit.Right + 12;
+        int barX = (omsx ? fieldX + 118 + 190 : _exScanHit.Right) + 12;
         float filled = Math.Clamp(_extractFrame / (float)_extractTotalFrames, 0f, 1f);
 
         // A spinner (so it is obvious the app is busy even when nothing is logged) and the elapsed time.
@@ -1169,8 +1241,14 @@ public sealed partial class VisualizerGame : Game
                 dx + 16, logTop + 24, Dim);
         }
 
-        Text("ENTER RUNS · ESC CANCELS · THE RESULT GOES TO THE OUTPUT FOLDER AND OPENS HERE",
-            dx + 16, dy + dh - 22, Dim);
+        if (!_extractRunning)
+        {
+            _exBackHit = new Rectangle(dx + 16, dy + dh - 28, 90, 18);
+            DrawButton(_exBackHit, "< BACK", false, Accent);
+        }
+
+        Text("ENTER RUNS · ESC CANCELS · THE RESULT OPENS HERE WHEN IT IS DONE",
+            dx + 120, dy + dh - 22, Dim);
     }
 
     /// <summary>Analyses the chosen ROM once per path (size, SHA-1, mapper, header) for the dialog.</summary>

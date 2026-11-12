@@ -28,6 +28,7 @@ public sealed class VisualizerSettings
     public string? LastRomKeys { get; set; }
     public int LastRomMapper { get; set; }
     public int LastRomSeconds { get; set; } = 30;
+    public string? OpenMsxPath { get; set; }
 
     private const int MaxRecent = 8;
 

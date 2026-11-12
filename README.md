@@ -302,9 +302,34 @@ found and guessed with openMSX's own rules otherwise.
 
 ### From the player
 
-`F3` (or the **EXTRACT FROM ROM** chip) opens the dialog: pick a `.rom` or the `.zip` as downloaded
-(its own browser), check the **DETECTED** line (size, mapper and where it came from, header), choose
-60/50 Hz and whether to **AUTO-PRESS** the fire button and space bar, and pick a mode:
+`F3` (or the **EXPORT MUSIC FROM A ROM** chip) opens a three-step assistant. Every step says what it
+is for:
+
+| Step | What you do | What the app does |
+| :--- | :--- | :--- |
+| **1 ROM** | pick a `.rom`, or the `.zip` exactly as downloaded (type, paste, browse) | opens the zip by itself, shows size, mapper (and where it came from), header and SHA-1, and **runs the game for 8 s** to see which chips it uses |
+| **2 METHOD** | choose **openMSX** or the **built-in extractor (experimental)** | recommends one from the test run; offers to **download and install openMSX** when it is missing |
+| **3 EXTRACT** | choose what to extract and press the button | runs it with a spinner, elapsed time and progress, then opens the result in the player |
+
+<table><tr>
+<td><img src="docs/media/export-1-rom.png" width="100%"></td>
+<td><img src="docs/media/export-2-method.png" width="100%"></td>
+</tr></table>
+
+| Method | Chips it hears | Good for |
+| :--- | :--- | :--- |
+| **openMSX** | PSG, SCC, SCC+, MSX-MUSIC (FM), MSX-AUDIO | exact results, and any game that uses FM; needs openMSX (free, ~9 MB) |
+| **Built-in** | PSG and SCC | nothing to install, fast, and it can **find every song by itself** |
+
+**openMSX is never bundled** (it is GPL). If it is not found (setting, `MSXAUDIO_OPENMSX`, the install
+folder, Program Files or `PATH`), step 2 shows **DOWNLOAD AND INSTALL**: the portable build is fetched
+from the project's own GitHub releases, checked against its published size and SHA-256 and unpacked in
+`%LOCALAPPDATA%\MsxAudio\openmsx` (no admin rights). **I ALREADY HAVE IT** takes a pasted path instead.
+openMSX captures what plays (with auto-press) or runs a profile; **FIND ALL SONGS** needs the built-in
+extractor.
+
+In step 3 you can also choose 60/50 Hz and whether to **AUTO-PRESS** the fire button and space bar,
+and pick a mode:
 
 | Mode | What it does | When to use |
 | :--- | :--- | :--- |

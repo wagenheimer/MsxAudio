@@ -6,7 +6,24 @@ All notable changes to this package are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (export assistant, track list, scan)
+- **Export assistant** (F3): 1 ROM, 2 METHOD, 3 EXTRACT. A test run of the cartridge reports which
+  chips it uses and recommends openMSX (FM / MSX-AUDIO / SCC+) or the built-in extractor.
+- **openMSX support**: `OpenMsxLocator`, `OpenMsxInstaller` (portable build from the project's GitHub
+  releases, size + SHA-256 checked, per-user folder, never bundled) and `OpenMsxCapture` (records
+  every chip the machine has). Capture and profile modes run on openMSX.
+- **Track list**: a keyboard cursor (arrows with repeat, page, home/end, Enter plays, `T` play-on-move),
+  different drawing for the playing row, the cursor and the mouse row, and `.msxaudio` packs shown as
+  a group (colour stripe, `PACK` tag, "N SONGS IN M PACKS").
+- **Open Folder dialog**: OPEN FOLDER button, recent folders with their full path.
+- **Scan**: the game's own calls to the sound routine are ignored while scanning (its title music no
+  longer replaces or mixes with the id), one fresh machine per id in parallel, each sound cut where it
+  ends, ids 1-255, a filter for sparse never-ending tones read past the id table.
+
 ### Fixed
+- Clicking a song of a `.msxaudio` pack highlighted the pack's first song.
+- The scan searched Konami (4)'s fixed `0x4000` window in every bank and could pick a routine that
+  cannot be called (Penguin Adventure found 6 "sounds"; it now finds 238 entries).
 - **Konami (4) mapper** used the SCC cartridge's bank registers, so it never switched banks. It now
   uses `0x6000`/`0x8000`/`0xA000` with bank 0 fixed. This is what left Penguin Adventure silent.
 - **SCC window** was always visible: reading `0x9800` returned `0xFF` even when that bank held ROM
