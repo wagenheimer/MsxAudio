@@ -99,6 +99,21 @@ public sealed class AudioProfile
     /// <summary>Ready-made profiles.</summary>
     public static AudioProfile[] All => new[] { Original, Stereo, Remaster, Auto };
 
+    /// <summary>
+    /// The profile after <paramref name="name"/> in <see cref="All"/>, or before it when
+    /// <paramref name="direction"/> is negative. Used by "cycle profile" menu entries.
+    /// </summary>
+    public static AudioProfile Next(string? name, int direction = 1)
+    {
+        var profiles = All;
+        int index = Array.FindIndex(profiles, p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (index < 0)
+            index = 0;
+
+        int step = direction < 0 ? -1 : 1;
+        return profiles[(index + step + profiles.Length) % profiles.Length];
+    }
+
     /// <summary>Copy of the profile with another oversampling factor (short effects can use less).</summary>
     public AudioProfile WithOversample(int oversample) => new()
     {

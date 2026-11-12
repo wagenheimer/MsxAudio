@@ -108,6 +108,38 @@ public sealed class MsxAudioLibrary : IDisposable
     public MsxAudioSong? Find(string id) =>
         Manifest.Songs.Concat(Manifest.Clips).FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// Finds a song or effect by the **id it has in the original game** (e.g. King's Valley II's
+    /// <c>0x0B</c>), which is what a game's event code carries around.
+    /// </summary>
+    public MsxAudioSong? FindByOriginalId(int originalId) =>
+        Manifest.Songs.Concat(Manifest.Clips).FirstOrDefault(s => s.OriginalId == originalId);
+
+    /// <summary>
+    /// Ids of the original game mapped to the package ids, split into songs and effects.
+    /// </summary>
+    /// <remarks>
+    /// A game that receives a sound id from its own code needs both maps; building them from the
+    /// manifest keeps that knowledge in one place (the package), not in the game.
+    /// </remarks>
+    public (Dictionary<int, string> Songs, Dictionary<int, string> Effects) BuildOriginalIdMap()
+    {
+        var songs = new Dictionary<int, string>();
+        var effects = new Dictionary<int, string>();
+
+        foreach (MsxAudioSong song in Manifest.Songs)
+        {
+            if (song.OriginalId is int id) songs[id] = song.Id;
+        }
+
+        foreach (MsxAudioSong clip in Manifest.Clips)
+        {
+            if (clip.OriginalId is int id) effects[id] = clip.Id;
+        }
+
+        return (songs, effects);
+    }
+
     /// <summary>Adds a VGM as a song.</summary>
     public MsxAudioSong AddSong(
         string id,

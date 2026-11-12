@@ -598,7 +598,7 @@ through openMSX. The in-process machine does not record them yet.
 ## CLI tool
 
 ```bash
-MsxAudioTool import <vgm-folder> <out.msxaudio> [--title T] [--clips]
+MsxAudioTool import <vgm-folder> <out.msxaudio> [--title T] [--clips] [--manifest audio.json]
 MsxAudioTool info <package.msxaudio>
 MsxAudioTool extract <rom> <out.msxaudio> --profile profile.json [--openmsx path]
 MsxAudioTool extract-direct <rom> <out.msxaudio> --profile profile.json

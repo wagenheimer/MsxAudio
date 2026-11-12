@@ -114,13 +114,24 @@ internal static class Program
 
     private static int Import(string[] args)
     {
-        if (args.Length < 2) return Usage("import <vgm-dir> <out.msxaudio> [--title T] [--clips]");
+        if (args.Length < 2)
+            return Usage("import <vgm-dir> <out.msxaudio> [--title T] [--clips] [--manifest audio.json]");
 
         string directory = args[0];
         string output = args[1];
         string title = Value(args, "--title") ?? Path.GetFileNameWithoutExtension(output);
-        bool clips = args.Contains("--clips");
 
+        // A manifest keeps ids, names and the "loops or not" decision from the content pipeline.
+        if (Value(args, "--manifest") is { Length: > 0 } manifestPath)
+        {
+            var fromManifest = VgmImporter.ImportManifest(directory, manifestPath, title, Console.WriteLine);
+            fromManifest.Manifest.Source = directory;
+            fromManifest.Save(output);
+            Console.WriteLine($"{fromManifest.Songs.Count} songs, {fromManifest.Clips.Count} effects -> {output}");
+            return 0;
+        }
+
+        bool clips = args.Contains("--clips");
         var library = VgmImporter.Import(directory, title, music: !clips, log: Console.WriteLine);
         library.Manifest.Source = directory;
         library.Save(output);
