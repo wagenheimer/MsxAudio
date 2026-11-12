@@ -75,6 +75,7 @@ public sealed partial class VisualizerGame : Game
     private Rectangle _exOutHit, _exOutBrowseHit, _exFmtVgmHit, _exFmtPkgHit, _exPsgHit, _exSccHit;
     private Rectangle _exMinusHit, _exPlusHit, _exStartHit, _exScanHit, _exCloseHit;
     private Rectangle _exModeCaptureHit, _exModeProfileHit, _exHzHit, _exAutoHit;
+    private Rectangle _exRomPasteHit, _exOutPasteHit;
     private Rectangle _extractButtonHit;      // header chip
 
     /// <summary>Opens the extraction dialog (F3 or the header chip).</summary>
@@ -559,11 +560,47 @@ public sealed partial class VisualizerGame : Game
                 _extractProfile += character;
                 _extractMode = ExtractMode.Profile;
                 break;
+            case 3:
+                SetOutFolderText(_extractOutDir + character);
+                break;
             default:
                 _extractKeys += character;
                 break;
         }
     }
+
+    /// <summary>Output folder typed or pasted by hand; empty goes back to the automatic folder.</summary>
+    private void SetOutFolderText(string text)
+    {
+        _extractOutAuto = text.Length == 0;
+        _extractOutDir = _extractOutAuto ? DefaultOutDir(_extractRom) : text;
+    }
+
+    /// <summary>Pastes the clipboard (a path, or a file copied in Explorer) into a field.</summary>
+    private void PasteInto(int field)
+    {
+        if (_extractRunning || Clipboard.TryReadText() is not { Length: > 0 } raw)
+            return;
+
+        string text = raw.Replace("\r", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries)[0]
+            .Trim().Trim('"');
+
+        if (text.StartsWith("file:///", StringComparison.OrdinalIgnoreCase))
+            text = Uri.UnescapeDataString(text[8..]).Replace('/', Path.DirectorySeparatorChar);
+
+        _extractField = field;
+
+        // A file pasted into the output field means "put it in that file's folder".
+        if (field == 3 && !Directory.Exists(text) && Path.HasExtension(text))
+            text = Path.GetDirectoryName(text) ?? text;
+
+        SetExtractFieldText(text);
+        _extractError = null;
+    }
+
+    /// <summary>Fields the Tab key walks through, in screen order.</summary>
+    private int[] ExtractFieldOrder() =>
+        _extractMode == ExtractMode.Profile ? new[] { 0, 2, 3 } : new[] { 0, 1, 3 };
 
     /// <summary>Replaces the focused field with <paramref name="text"/> (paste, or a dropped path).</summary>
     private void SetExtractFieldText(string text)
@@ -576,6 +613,9 @@ public sealed partial class VisualizerGame : Game
             case 2:
                 _extractProfile = text;
                 _extractMode = ExtractMode.Profile;
+                break;
+            case 3:
+                SetOutFolderText(text);
                 break;
             default:
                 _extractKeys = text;
@@ -601,12 +641,16 @@ public sealed partial class VisualizerGame : Game
         bool ctrl = _keys.IsKeyDown(Keys.LeftControl) || _keys.IsKeyDown(Keys.RightControl);
         bool shift = _keys.IsKeyDown(Keys.LeftShift) || _keys.IsKeyDown(Keys.RightShift);
 
-        if (!_extractRunning &&
-            ((ctrl && Pressed(Keys.V)) || (shift && Pressed(Keys.Insert))) &&
-            Clipboard.TryReadText() is { Length: > 0 } pasted)
+        if (!_extractRunning && ((ctrl && Pressed(Keys.V)) || (shift && Pressed(Keys.Insert))))
         {
-            pasted = pasted.Trim().Trim('"');
-            SetExtractFieldText(pasted);
+            PasteInto(_extractField);
+            return;
+        }
+
+        // Ctrl+Backspace / Ctrl+A-style clear: wipe the whole focused field.
+        if (!_extractRunning && ctrl && Pressed(Keys.Back))
+        {
+            SetExtractFieldText(string.Empty);
             return;
         }
 
@@ -618,9 +662,10 @@ public sealed partial class VisualizerGame : Game
 
         if (Pressed(Keys.Tab))
         {
-            _extractField = _extractMode == ExtractMode.Profile
-                ? (_extractField == 2 ? 0 : 2)
-                : (_extractField == 1 ? 0 : 1);
+            int[] order = ExtractFieldOrder();
+            int at = Array.IndexOf(order, _extractField);
+            int step = shift ? order.Length - 1 : 1;
+            _extractField = order[(Math.Max(at, 0) + step) % order.Length];
             return;
         }
 
@@ -632,13 +677,16 @@ public sealed partial class VisualizerGame : Game
                 _extractKeys = _extractKeys[..^1];
             else if (_extractField == 2 && _extractProfile.Length > 0)
                 _extractProfile = _extractProfile[..^1];
+            else if (_extractField == 3 && !_extractOutAuto && _extractOutDir.Length > 0)
+                SetOutFolderText(_extractOutDir[..^1]);
 
             return;
         }
 
-        if (Pressed(Keys.Delete) && !_extractRunning && _extractField == 0)
+        // Delete wipes the focused field (the output folder goes back to AUTO).
+        if (Pressed(Keys.Delete) && !_extractRunning)
         {
-            SetRom(string.Empty);
+            SetExtractFieldText(string.Empty);
             return;
         }
 
@@ -690,7 +738,25 @@ public sealed partial class VisualizerGame : Game
             return;
         }
 
-        if (_exOutHit.Contains(p) || _exOutBrowseHit.Contains(p))
+        if (_exRomPasteHit.Contains(p))
+        {
+            PasteInto(0);
+            return;
+        }
+
+        if (_exOutPasteHit.Contains(p))
+        {
+            PasteInto(3);
+            return;
+        }
+
+        if (_exOutHit.Contains(p) && !_extractRunning)
+        {
+            _extractField = 3;
+            return;
+        }
+
+        if (_exOutBrowseHit.Contains(p))
         {
             OpenFolderPicker();
             return;
@@ -787,6 +853,24 @@ public sealed partial class VisualizerGame : Game
         return text + "…";
     }
 
+    /// <summary>A path field: shows the end of the path so the file name is visible, with a caret when focused.</summary>
+    private void DrawPathField(Rectangle rect, string value, string placeholder, bool focused)
+    {
+        Rect(rect, focused ? Accent : Grid);
+        Rect(rect.X + 1, rect.Y + 1, rect.Width - 2, rect.Height - 2, PanelColor);
+
+        int room = rect.Width - 14;
+        string shown = value.Length == 0 ? placeholder : FitTextLeft(value, room);
+        Color color = value.Length == 0 ? Dim : focused ? Accent : TextColor;
+        Text(value.Length == 0 ? FitText(shown, room) : shown, rect.X + 6, rect.Y + 5, color);
+
+        if (focused)
+        {
+            int caret = value.Length == 0 ? rect.X + 6 : rect.X + 6 + Math.Min(PixelFont.Measure(shown), room);
+            Rect(caret, rect.Y + 3, 1, rect.Height - 6, Accent);
+        }
+    }
+
     private void DrawField(Rectangle rect, string text, bool focused, Color? textColor = null)
     {
         Rect(rect, Grid);
@@ -818,22 +902,14 @@ public sealed partial class VisualizerGame : Game
         // ROM.
         Text("ROM", labelX, dy + 44, Dim);
 
-        string romLabel = _extractRom.Length == 0
-            ? "(NO ROM CHOSEN)"
-            : _extractField == 0
-                ? _extractRom
-                : Path.GetFileName(_extractRom);
+        // The path is always shown whole (its tail, so the file name stays visible) and is editable:
+        // type it, paste it (Ctrl+V or PASTE; a file copied in Explorer works too) or BROWSE.
+        int pathW = fieldW - 66;
+        _exRomHit = new Rectangle(fieldX, dy + 38, pathW, 18);
+        DrawPathField(_exRomHit, _extractRom, "(PASTE OR TYPE THE ROM / ZIP PATH, OR BROWSE)", _extractField == 0);
 
-        _exRomHit = new Rectangle(fieldX, dy + 38, fieldW, 18);
-        Rect(_exRomHit, Grid);
-        Rect(_exRomHit.X + 1, _exRomHit.Y + 1, _exRomHit.Width - 2, _exRomHit.Height - 2, PanelColor);
-        Text(_extractField == 0 ? FitTextLeft(romLabel, _exRomHit.Width - 12) : FitText(romLabel, _exRomHit.Width - 12),
-            _exRomHit.X + 6, _exRomHit.Y + 5,
-            _extractRom.Length > 0 ? (_extractField == 0 ? Accent : TextColor) : Dim);
-
-        if (_extractField == 0)
-            Rect(_exRomHit.X + 6 + Math.Min(PixelFont.Measure(FitTextLeft(romLabel, _exRomHit.Width - 12)), _exRomHit.Width - 12),
-                _exRomHit.Y + 3, 1, _exRomHit.Height - 6, Accent);
+        _exRomPasteHit = new Rectangle(fieldX + pathW + 6, dy + 38, 60, 18);
+        DrawButton(_exRomPasteHit, "PASTE", false, Accent);
 
         _exBrowseHit = new Rectangle(fieldX + fieldW + 8, dy + 38, 84, 18);
         DrawButton(_exBrowseHit, "BROWSE", false, Accent);
@@ -841,7 +917,10 @@ public sealed partial class VisualizerGame : Game
         // What the ROM is (size, mapper, where the mapper came from, header): refreshed on path changes.
         RefreshExtractInfo();
         string detected = _extractInfoError ?? _extractInfo?.Summary ?? string.Empty;
-        if (detected.Length > 0)
+        bool romMissing = _extractRom.Length > 0 && !File.Exists(_extractRom);
+        if (romMissing)
+            Text("FILE NOT FOUND", fieldX, dy + 60, Warn);
+        else if (detected.Length > 0)
             Text(FitText("DETECTED: " + detected.ToUpperInvariant(), fieldW), fieldX, dy + 60,
                 _extractInfoError is null ? Dim : Warn);
 
@@ -922,15 +1001,19 @@ public sealed partial class VisualizerGame : Game
         Text("OUTPUT", labelX, dy + 176, Dim);
 
         string folder = OutputFolder();
-        string folderLabel = folder.Length == 0
-            ? "(NEXT TO THE ROM)"
-            : _extractOutAuto ? folder + "   (AUTO)" : folder;
 
-        _exOutHit = new Rectangle(fieldX, dy + 170, fieldW, 18);
-        DrawField(_exOutHit, folderLabel, false, folder.Length == 0 ? Dim : TextColor);
+        _exOutHit = new Rectangle(fieldX, dy + 170, pathW, 18);
+        DrawPathField(_exOutHit, folder, "(NEXT TO THE ROM)", _extractField == 3);
+
+        _exOutPasteHit = new Rectangle(fieldX + pathW + 6, dy + 170, 60, 18);
+        DrawButton(_exOutPasteHit, "PASTE", false, Accent);
 
         _exOutBrowseHit = new Rectangle(fieldX + fieldW + 8, dy + 170, 84, 18);
         DrawButton(_exOutBrowseHit, "FOLDER", false, Accent);
+
+        if (_extractField == 3)
+            Text(_extractOutAuto ? "AUTOMATIC FOLDER: TYPE OR PASTE TO CHANGE IT" : "DEL = BACK TO THE AUTOMATIC FOLDER",
+                fieldX, dy + 190, Dim);
 
         // Format: a capture can be saved as one VGM or as a one-song package. Profiles/scans always
         // produce a package, so the VGM chip is only meaningful in capture mode.
@@ -963,8 +1046,9 @@ public sealed partial class VisualizerGame : Game
             ? Path.GetFileName(running)
             : FileNameForCurrentMode();
 
-        Text(FitText("FILE: " + (fileName.Length > 0 ? fileName : "(CHOOSE A ROM)"), dw - 240),
-            fieldX, dy + 222, Dim);
+        string saveTo = fileName.Length == 0 ? string.Empty : Path.Combine(OutputFolder(), fileName);
+        Text("SAVES TO", labelX, dy + 222, Dim);
+        Text(saveTo.Length > 0 ? FitTextLeft(saveTo, fieldW + 92) : "(CHOOSE A ROM)", fieldX, dy + 222, TextColor);
 
         // Start / scan / progress.
         _exStartHit = new Rectangle(fieldX, dy + 244, 110, 20);
