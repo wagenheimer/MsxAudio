@@ -383,6 +383,29 @@ public class MiniMsxTests
         Assert.Contains(list, c => c.Address == 0x6100 && c.Bank == 5);
     }
 
+    [Fact]
+    public void KonamiScan_DoesNotSearchTheFixedWindowInOtherBanks()
+    {
+        // Konami (4) shows bank 0 at 0x4000 whatever is written: a "routine" at 0x4100 inside bank 5
+        // can never be called, so it must not be offered as a candidate.
+        var rom = new byte[0x10000];
+        rom[0] = (byte)'A'; rom[1] = (byte)'B';
+        rom[2] = 0x10; rom[3] = 0x40;
+        rom[0x10] = 0xC9;
+
+        byte[] routine = { 0x3E, 0x00, 0xD3, 0xA0, 0xC9 };    // LD A,0 : OUT (0xA0),A : RET
+        Array.Copy(routine, 0, rom, 5 * 0x2000 + 0x100, routine.Length);
+
+        int at = 0x40;
+        for (int i = 0; i < 3; i++)
+        {
+            rom[at++] = 0xCD; rom[at++] = 0x00; rom[at++] = 0x41;   // CALL 0x4100
+        }
+
+        List<RomSoundScan.Candidate> list = RomSoundScan.FindCandidateList(rom, RomMapper.Konami, 8);
+        Assert.DoesNotContain(list, c => c.Address == 0x4100 && c.Bank == 5);
+    }
+
     private void Dump(VgmFile vgm)
     {
         foreach (VgmEvent e in vgm.Events)

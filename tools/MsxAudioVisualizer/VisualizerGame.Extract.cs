@@ -50,7 +50,7 @@ public sealed partial class VisualizerGame : Game
 
     private string _extractOutDir = string.Empty;   // empty = the folder next to the ROM
     private bool _extractOutAuto = true;            // follow the ROM's folder until the user picks one
-    private int _extractFormat;                     // 0 = .vgm, 1 = .msxaudio (capture only)
+    private int _extractFormat = 2;                 // 0 = .vgm, 1 = .msxaudio, 2 = auto (capture: .vgm; profile/scan: .msxaudio)
     private bool _extractPsg = true;
     private bool _extractScc = true;
     private bool _extractPal;                       // 50 Hz instead of 60 Hz
@@ -75,7 +75,8 @@ public sealed partial class VisualizerGame : Game
     private Rectangle _exOutHit, _exOutBrowseHit, _exFmtVgmHit, _exFmtPkgHit, _exPsgHit, _exSccHit;
     private Rectangle _exMinusHit, _exPlusHit, _exStartHit, _exScanHit, _exCloseHit;
     private Rectangle _exModeCaptureHit, _exModeProfileHit, _exHzHit, _exAutoHit;
-    private Rectangle _exRomPasteHit, _exOutPasteHit;
+    private Rectangle _exRomPasteHit, _exOutPasteHit, _exFmtAutoHit, _exOpenFolderHit;
+    private string[] _extractInfoLines = Array.Empty<string>();   // what the dialog says about the chosen ROM
     private Rectangle _extractButtonHit;      // header chip
 
     /// <summary>Opens the extraction dialog (F3 or the header chip).</summary>
@@ -253,7 +254,7 @@ public sealed partial class VisualizerGame : Game
         int mapperIndex = _extractMapper;
         bool psg = _extractPsg;
         bool scc = _extractScc;
-        bool package = _extractFormat == 1;
+        bool package = ExtractAsPackage();
         bool pal = _extractPal;
         bool autoPress = _extractAutoPress;
         ExtractMode mode = _extractMode;
@@ -598,6 +599,13 @@ public sealed partial class VisualizerGame : Game
         _extractError = null;
     }
 
+    /// <summary>
+    /// True when the result is a <c>.msxaudio</c> package. Auto: a capture is one song (a plain
+    /// <c>.vgm</c>), a profile or a scan is a whole song list (a package).
+    /// </summary>
+    private bool ExtractAsPackage() =>
+        _extractMode != ExtractMode.Capture || _extractFormat == 1;
+
     /// <summary>Fields the Tab key walks through, in screen order.</summary>
     private int[] ExtractFieldOrder() =>
         _extractMode == ExtractMode.Profile ? new[] { 0, 2, 3 } : new[] { 0, 1, 3 };
@@ -750,6 +758,12 @@ public sealed partial class VisualizerGame : Game
             return;
         }
 
+        if (_exOpenFolderHit.Contains(p))
+        {
+            OpenOutputFolder();
+            return;
+        }
+
         if (_exOutHit.Contains(p) && !_extractRunning)
         {
             _extractField = 3;
@@ -759,6 +773,12 @@ public sealed partial class VisualizerGame : Game
         if (_exOutBrowseHit.Contains(p))
         {
             OpenFolderPicker();
+            return;
+        }
+
+        if (_exFmtAutoHit.Contains(p) && !_extractRunning)
+        {
+            _extractFormat = 2;
             return;
         }
 
@@ -914,24 +934,27 @@ public sealed partial class VisualizerGame : Game
         _exBrowseHit = new Rectangle(fieldX + fieldW + 8, dy + 38, 84, 18);
         DrawButton(_exBrowseHit, "BROWSE", false, Accent);
 
-        // What the ROM is (size, mapper, where the mapper came from, header): refreshed on path changes.
+        // What the ROM turned out to be: where it came from (a .zip is unpacked by itself), size,
+        // mapper and how it was chosen, header, hash, and what to do next. Refreshed on path changes.
         RefreshExtractInfo();
-        string detected = _extractInfoError ?? _extractInfo?.Summary ?? string.Empty;
         bool romMissing = _extractRom.Length > 0 && !File.Exists(_extractRom);
         if (romMissing)
             Text("FILE NOT FOUND", fieldX, dy + 60, Warn);
-        else if (detected.Length > 0)
-            Text(FitText("DETECTED: " + detected.ToUpperInvariant(), fieldW), fieldX, dy + 60,
-                _extractInfoError is null ? Dim : Warn);
+        else if (_extractInfoError is not null)
+            Text(FitText(_extractInfoError.ToUpperInvariant(), fieldW + 92), fieldX, dy + 60, Warn);
+        else
+            for (int i = 0; i < _extractInfoLines.Length; i++)
+                Text(FitText(_extractInfoLines[i], fieldW + 92), fieldX, dy + 60 + i * 11,
+                    i == 2 ? Accent : Dim);
 
         // Mode: capture (any ROM) or profile (curated song list).
-        Text("MODE", labelX, dy + 76, Dim);
+        Text("MODE", labelX, dy + 102, Dim);
         bool capture = _extractMode == ExtractMode.Capture;
 
-        _exModeCaptureHit = new Rectangle(fieldX, dy + 70, 92, 18);
+        _exModeCaptureHit = new Rectangle(fieldX, dy + 96, 92, 18);
         DrawButton(_exModeCaptureHit, "CAPTURE", capture, Accent);
 
-        _exModeProfileHit = new Rectangle(fieldX + 96, dy + 70, 92, 18);
+        _exModeProfileHit = new Rectangle(fieldX + 96, dy + 96, 92, 18);
         DrawButton(_exModeProfileHit, "PROFILE", !capture, Accent);
 
         if (!capture)
@@ -939,12 +962,12 @@ public sealed partial class VisualizerGame : Game
             int profileX = fieldX + 96 + 92 + 10;
             int profileW = dx + dw - 116 - profileX;
 
-            _exProfileHit = new Rectangle(profileX, dy + 70, profileW, 18);
+            _exProfileHit = new Rectangle(profileX, dy + 96, profileW, 18);
             DrawField(_exProfileHit,
                 _extractProfile.Length > 0 ? Path.GetFileName(_extractProfile) : "(NO PROFILE CHOSEN)",
                 _extractField == 2, _extractProfile.Length > 0 ? null : Dim);
 
-            _exProfileBrowseHit = new Rectangle(profileX + profileW + 8, dy + 70, 84, 18);
+            _exProfileBrowseHit = new Rectangle(profileX + profileW + 8, dy + 96, 84, 18);
             DrawButton(_exProfileBrowseHit, "BROWSE", false, Accent);
         }
         else
@@ -954,91 +977,96 @@ public sealed partial class VisualizerGame : Game
         }
 
         // Mapper + duration.
-        Text("MAPPER", labelX, dy + 100, Dim);
-        _exMapperHit = new Rectangle(fieldX, dy + 94, 150, 18);
+        Text("MAPPER", labelX, dy + 126, Dim);
+        _exMapperHit = new Rectangle(fieldX, dy + 120, 150, 18);
         DrawButton(_exMapperHit, ExtractMappers[_extractMapper].Label, true, Accent);
 
         int secondsX = fieldX + 190;
-        Text("SECONDS", secondsX, dy + 100, Dim);
-        _exMinusHit = new Rectangle(secondsX + 70, dy + 94, 18, 18);
+        Text("SECONDS", secondsX, dy + 126, Dim);
+        _exMinusHit = new Rectangle(secondsX + 70, dy + 120, 18, 18);
         DrawButton(_exMinusHit, "-", false, Dim);
 
         string seconds = _extractSeconds.ToString();
-        Text(seconds, secondsX + 96 + (24 - PixelFont.Measure(seconds)) / 2, dy + 100, TextColor);
+        Text(seconds, secondsX + 96 + (24 - PixelFont.Measure(seconds)) / 2, dy + 126, TextColor);
 
-        _exPlusHit = new Rectangle(secondsX + 124, dy + 94, 18, 18);
+        _exPlusHit = new Rectangle(secondsX + 124, dy + 120, 18, 18);
         DrawButton(_exPlusHit, "+", false, Dim);
 
         // 60 Hz (NTSC) or 50 Hz (PAL): the tempo of the whole capture. Auto-press: tap fire and the
         // space bar every few seconds so the game leaves its title/menu screens by itself.
-        _exHzHit = new Rectangle(secondsX + 160, dy + 94, 58, 18);
+        _exHzHit = new Rectangle(secondsX + 160, dy + 120, 58, 18);
         DrawButton(_exHzHit, _extractPal ? "50 HZ" : "60 HZ", true, Accent);
 
-        _exAutoHit = new Rectangle(secondsX + 224, dy + 94, 118, 18);
+        _exAutoHit = new Rectangle(secondsX + 224, dy + 120, 118, 18);
         DrawButton(_exAutoHit, "AUTO-PRESS", _extractAutoPress && capture, capture ? Accent : Dim);
 
         // Capture: key script. Profile: what the profile holds.
         if (capture)
         {
-            Text("KEYS", labelX, dy + 128, Dim);
-            _exKeysHit = new Rectangle(fieldX, dy + 122, fieldW + 92, 18);
+            Text("KEYS", labelX, dy + 154, Dim);
+            _exKeysHit = new Rectangle(fieldX, dy + 148, fieldW + 92, 18);
             DrawField(_exKeysHit, _extractKeys.Length > 0 ? _extractKeys : "(NONE)", _extractField == 1,
                 _extractKeys.Length > 0 ? null : Dim);
 
             Text("NAME@SECOND (START, FIRE, UP, DOWN, LEFT, RIGHT) OR ROW:MASK@SECOND",
-                fieldX, dy + 146, Dim);
+                fieldX, dy + 172, Dim);
         }
         else
         {
             _exKeysHit = Rectangle.Empty;
-            Text("CONTENT", labelX, dy + 128, Dim);
-            Text(FitText(ProfileSummary(), dw - 130), fieldX, dy + 128, TextColor);
+            Text("CONTENT", labelX, dy + 154, Dim);
+            Text(FitText(ProfileSummary(), dw - 130), fieldX, dy + 154, TextColor);
             Text("THE PROFILE KNOWS THE DRIVER ADDRESSES, THE IDS AND THE NAMES",
-                fieldX, dy + 146, Dim);
+                fieldX, dy + 172, Dim);
         }
 
         // Output: folder (clickable field + FOLDER button), format and chips.
-        Text("OUTPUT", labelX, dy + 176, Dim);
+        Text("OUTPUT", labelX, dy + 202, Dim);
 
         string folder = OutputFolder();
 
-        _exOutHit = new Rectangle(fieldX, dy + 170, pathW, 18);
+        _exOutHit = new Rectangle(fieldX, dy + 196, pathW, 18);
         DrawPathField(_exOutHit, folder, "(NEXT TO THE ROM)", _extractField == 3);
 
-        _exOutPasteHit = new Rectangle(fieldX + pathW + 6, dy + 170, 60, 18);
+        _exOutPasteHit = new Rectangle(fieldX + pathW + 6, dy + 196, 60, 18);
         DrawButton(_exOutPasteHit, "PASTE", false, Accent);
 
-        _exOutBrowseHit = new Rectangle(fieldX + fieldW + 8, dy + 170, 84, 18);
+        _exOutBrowseHit = new Rectangle(fieldX + fieldW + 8, dy + 196, 84, 18);
         DrawButton(_exOutBrowseHit, "FOLDER", false, Accent);
 
         if (_extractField == 3)
             Text(_extractOutAuto ? "AUTOMATIC FOLDER: TYPE OR PASTE TO CHANGE IT" : "DEL = BACK TO THE AUTOMATIC FOLDER",
-                fieldX, dy + 190, Dim);
+                fieldX, dy + 216, Dim);
 
         // Format: a capture can be saved as one VGM or as a one-song package. Profiles/scans always
         // produce a package, so the VGM chip is only meaningful in capture mode.
-        Text("FORMAT", labelX, dy + 204, Dim);
+        Text("FORMAT", labelX, dy + 230, Dim);
 
-        bool canPickVgm = _extractMode == ExtractMode.Capture;
-        bool vgm = canPickVgm && _extractFormat == 0;
+        bool canPick = _extractMode == ExtractMode.Capture;
+        bool auto = !canPick || _extractFormat == 2;
+        bool asPackage = ExtractAsPackage();
 
-        _exFmtVgmHit = new Rectangle(fieldX, dy + 198, 50, 18);
-        DrawButton(_exFmtVgmHit, "VGM", vgm, Accent);
+        _exFmtAutoHit = new Rectangle(fieldX, dy + 224, 50, 18);
+        DrawButton(_exFmtAutoHit, "AUTO", auto, Accent);
 
-        _exFmtPkgHit = new Rectangle(fieldX + 54, dy + 198, 96, 18);
-        DrawButton(_exFmtPkgHit, "MSXAUDIO", !vgm, Accent);
+        _exFmtVgmHit = new Rectangle(fieldX + 54, dy + 224, 44, 18);
+        DrawButton(_exFmtVgmHit, "VGM", !auto && !asPackage, canPick ? Accent : Dim);
 
-        if (!canPickVgm)
-            Text("(PACKAGE ONLY)", fieldX + 158, dy + 204, Dim);
+        _exFmtPkgHit = new Rectangle(fieldX + 102, dy + 224, 96, 18);
+        DrawButton(_exFmtPkgHit, "MSXAUDIO", !auto && asPackage, canPick ? Accent : Dim);
+
+        // Say what AUTO resolves to, so nobody has to guess.
+        Text(asPackage ? "= ALL SONGS (.MSXAUDIO)" : "= ONE SONG (.VGM)",
+            fieldX + 206, dy + 230, Dim);
 
         // Chips: what gets recorded (both on = the raw driver output).
-        int chipsX = fieldX + 300;
-        Text("CHIPS", chipsX - 52, dy + 204, Dim);
+        int chipsX = fieldX + 420;
+        Text("CHIPS", chipsX - 52, dy + 230, Dim);
 
-        _exPsgHit = new Rectangle(chipsX, dy + 198, 44, 18);
+        _exPsgHit = new Rectangle(chipsX, dy + 224, 44, 18);
         DrawButton(_exPsgHit, "PSG", _extractPsg, PsgColor);
 
-        _exSccHit = new Rectangle(chipsX + 48, dy + 198, 44, 18);
+        _exSccHit = new Rectangle(chipsX + 48, dy + 224, 44, 18);
         DrawButton(_exSccHit, "SCC", _extractScc, SccColor);
 
         // The file that will be written, so the whole path is visible without editing it.
@@ -1047,33 +1075,37 @@ public sealed partial class VisualizerGame : Game
             : FileNameForCurrentMode();
 
         string saveTo = fileName.Length == 0 ? string.Empty : Path.Combine(OutputFolder(), fileName);
-        Text("SAVES TO", labelX, dy + 222, Dim);
-        Text(saveTo.Length > 0 ? FitTextLeft(saveTo, fieldW + 92) : "(CHOOSE A ROM)", fieldX, dy + 222, TextColor);
+        Text("SAVES TO", labelX, dy + 248, Dim);
+        Text(saveTo.Length > 0 ? FitTextLeft(saveTo, fieldW) : "(CHOOSE A ROM)", fieldX, dy + 248, TextColor);
+
+        // Jump to where the result goes (or went): opens the folder in the system file manager.
+        _exOpenFolderHit = new Rectangle(fieldX + fieldW + 8, dy + 244, 84, 18);
+        DrawButton(_exOpenFolderHit, "OPEN FOLDER", false, Accent);
 
         // Start / scan / progress.
-        _exStartHit = new Rectangle(fieldX, dy + 244, 110, 20);
+        _exStartHit = new Rectangle(fieldX, dy + 270, 110, 20);
         DrawButton(_exStartHit,
             _extractRunning ? "STOP" : _extractMode == ExtractMode.Profile ? "EXTRACT ALL" : "CAPTURE",
             _extractRunning, _extractRunning ? Warn : Accent);
 
-        _exScanHit = new Rectangle(fieldX + 118, dy + 244, 152, 20);
+        _exScanHit = new Rectangle(fieldX + 118, dy + 270, 152, 20);
         DrawButton(_exScanHit, "FIND ALL SONGS", false, Accent);
 
         int barX = _exScanHit.Right + 12;
         int barW = dx + dw - 16 - barX - 46;
         float filled = Math.Clamp(_extractFrame / (float)_extractTotalFrames, 0f, 1f);
 
-        Rect(barX, dy + 250, barW, 8, Grid);
-        Rect(barX, dy + 250, (int)(barW * filled), 8, _extractRunning ? PsgColor : Accent);
+        Rect(barX, dy + 276, barW, 8, Grid);
+        Rect(barX, dy + 276, (int)(barW * filled), 8, _extractRunning ? PsgColor : Accent);
 
         string percent = $"{(int)(filled * 100)}%";
-        Text(percent, barX + barW + 10, dy + 250, _extractRunning ? TextColor : Dim);
+        Text(percent, barX + barW + 10, dy + 276, _extractRunning ? TextColor : Dim);
 
         if (_extractError is { } error)
-            Text(FitText(error, dw - 190), barX, dy + 232, Warn);
+            Text(FitText(error, dw - 190), barX, dy + 258, Warn);
 
         // Log tail.
-        int logTop = dy + 280;
+        int logTop = dy + 306;
         int logBottom = dy + dh - 30;
         Rect(dx + 16, logTop - 4, dw - 32, 1, Grid);
 
@@ -1112,6 +1144,7 @@ public sealed partial class VisualizerGame : Game
         _extractInfoPath = _extractRom;
         _extractInfo = null;
         _extractInfoError = null;
+        _extractInfoLines = Array.Empty<string>();
 
         if (!File.Exists(_extractRom))
             return;
@@ -1119,6 +1152,7 @@ public sealed partial class VisualizerGame : Game
         try
         {
             _extractInfo = RomInfo.Analyze(_extractRom);
+            _extractInfoLines = DescribeRom(_extractRom, _extractInfo);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
         {
@@ -1126,11 +1160,80 @@ public sealed partial class VisualizerGame : Game
         }
     }
 
+    /// <summary>
+    /// Opens the output folder in the file manager. A folder that does not exist yet (nothing was
+    /// extracted so far) falls back to its closest existing parent.
+    /// </summary>
+    private void OpenOutputFolder()
+    {
+        string folder = OutputFolder();
+
+        while (folder.Length > 0 && !Directory.Exists(folder))
+            folder = Path.GetDirectoryName(folder) ?? string.Empty;
+
+        if (folder.Length == 0)
+        {
+            _extractError = "CHOOSE A ROM OR AN OUTPUT FOLDER FIRST";
+            return;
+        }
+
+        try
+        {
+            var start = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = OperatingSystem.IsWindows() ? folder : OperatingSystem.IsMacOS() ? "open" : "xdg-open",
+                UseShellExecute = true,
+            };
+
+            if (!OperatingSystem.IsWindows())
+                start.ArgumentList.Add(folder);
+
+            System.Diagnostics.Process.Start(start);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            _extractError = "CANNOT OPEN THE FOLDER: " + ex.Message.ToUpperInvariant();
+        }
+    }
+
+    /// <summary>Three lines for the dialog: where the ROM came from, what it is, and what to do next.</summary>
+    private static string[] DescribeRom(string path, RomInfo info)
+    {
+        string source;
+        if (RomFile.IsArchive(path))
+        {
+            string entry = RomFile.FindCartridge(path) ?? "?";
+            source = "ZIP: USING " + Path.GetFileName(entry) + " INSIDE (UNPACKED AUTOMATICALLY, NOTHING TO EXTRACT BY HAND)";
+        }
+        else
+        {
+            source = "ROM FILE: " + Path.GetFileName(path);
+        }
+
+        string size = info.Size >= 1024 ? $"{info.Size / 1024} KB" : $"{info.Size} B";
+        string mapper = RomMapperNames.Name(info.Mapper) + (info.Scc ? " + SCC" : string.Empty);
+        string how = info.MapperSource == "database" ? "FOUND IN THE DATABASE" : "GUESSED FROM THE CODE";
+        string header = info.HasHeader ? $"HEADER OK, INIT {info.InitAddress:X4}" : "NO AB HEADER";
+        string detail = $"{size} · MAPPER {mapper} ({how}) · {header} · SHA-1 {info.Sha1[..8]}";
+
+        string tip;
+        if (!info.HasHeader)
+            tip = "TIP: NO AB HEADER, THIS MAY NOT BE A NORMAL CARTRIDGE ROM";
+        else if (info.Scc)
+            tip = "TIP: SCC CARTRIDGE, KEEP BOTH CHIPS ON. FIND ALL SONGS LISTS EVERY SOUND";
+        else if (info.MapperSource != "database" && info.Mapper != RomMapper.Linear)
+            tip = "TIP: MAPPER WAS GUESSED. IF THE RESULT IS SILENT, PICK ANOTHER MAPPER BELOW";
+        else
+            tip = "TIP: CAPTURE RECORDS WHAT THE GAME PLAYS. FIND ALL SONGS LISTS EVERY SOUND";
+
+        return new[] { source.ToUpperInvariant(), detail.ToUpperInvariant(), tip };
+    }
+
     /// <summary>File name the current mode will produce (shown under the output row).</summary>
     private string FileNameForCurrentMode() => _extractMode switch
     {
         ExtractMode.Profile => OutputFileName("_" + Path.GetFileNameWithoutExtension(_extractProfile), ".msxaudio"),
-        _ => OutputFileName("_capture", _extractFormat == 1 ? ".msxaudio" : ".vgm"),
+        _ => OutputFileName("_capture", ExtractAsPackage() ? ".msxaudio" : ".vgm"),
     };
 
     /// <summary>One-line description of the selected profile (name, ids, songs).</summary>

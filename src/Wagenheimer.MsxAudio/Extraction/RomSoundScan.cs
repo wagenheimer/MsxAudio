@@ -615,6 +615,11 @@ public static class RomSoundScan
             int inBank = (target - 0x4000) & (bankSize - 1);
             int banks = Math.Max(1, rom.Length / bankSize);
 
+            // Konami (4) has no register for the 0x4000 window: it always shows bank 0. A routine
+            // "found" there in any other bank can never be reached, so only bank 0 is searched.
+            if (mapper == RomMapper.Konami && target < 0x6000)
+                banks = 1;
+
             for (int bank = 0; bank < banks; bank++)
             {
                 if (WritesSound(rom, bank * bankSize + inBank, 0, true, bankSize, 0x4000))
