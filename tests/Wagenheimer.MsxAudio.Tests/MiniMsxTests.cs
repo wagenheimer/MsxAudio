@@ -406,6 +406,37 @@ public class MiniMsxTests
         Assert.DoesNotContain(list, c => c.Address == 0x4100 && c.Bank == 5);
     }
 
+    private static byte[] RomOfSize(int size, params (int At, int Address)[] bankWrites)
+    {
+        var rom = new byte[size];
+        rom[0] = (byte)'A'; rom[1] = (byte)'B'; rom[2] = 0x10; rom[3] = 0x40;
+
+        foreach ((int at, int address) in bankWrites)
+        {
+            rom[at] = 0x32;                                    // LD (address),A
+            rom[at + 1] = (byte)(address & 0xFF);
+            rom[at + 2] = (byte)(address >> 8);
+        }
+
+        return rom;
+    }
+
+    [Fact]
+    public void Mapper_AFiftySixKilobyteRomThatWritesTheBankRegistersIsBanked()
+    {
+        // The SCC release of Knightmare: seven 8 KB banks, and it starts by writing to 5000h/7000h/9000h/B000h.
+        byte[] rom = RomOfSize(0xE000, (0x44, 0x5000), (0x47, 0x7000), (0x4A, 0x9000), (0x4D, 0xB000));
+
+        Assert.Equal(RomMapper.KonamiScc, RomMapperNames.Guess(rom));
+    }
+
+    [Fact]
+    public void Mapper_AnOddSizedRomThatNeverSwitchesABankStaysLinear()
+    {
+        Assert.Equal(RomMapper.Linear, RomMapperNames.Guess(RomOfSize(0xC000)));
+        Assert.Equal(RomMapper.Linear, RomMapperNames.Guess(RomOfSize(0x8000, (0x44, 0x5000))));   // fits the window: nothing to bank
+    }
+
     private void Dump(VgmFile vgm)
     {
         foreach (VgmEvent e in vgm.Events)

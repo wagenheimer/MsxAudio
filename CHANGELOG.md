@@ -46,6 +46,15 @@ All notable changes to this package are documented here. The format follows
   ends, ids 1-255, a filter for sparse never-ending tones read past the id table.
 
 ### Fixed
+- **ROMs between 32 and 64 KB were always taken for linear**: the SCC release of Knightmare (56 KB, seven
+  8 KB banks) writes to the bank registers on startup and runs from the new bank, so as a linear ROM it
+  looped forever on its header and recorded nothing. Those sizes are now voted on like the bigger ones
+  (stay linear only if no bank register is ever written).
+- **Scans that took minutes**: the main program now gets one frame of Z80 time (about 60,000 T-states)
+  instead of 200,000 instructions, 13 times what the hardware can run, so a game that spins waiting for
+  the next frame no longer burns the whole budget; a repeated empty VDP status poll also ends the
+  slice like a HALT. A capture of 40 s of Knightmare went from minutes to 4 s. The scan also gives up
+  after 48 ids without a single sound, instead of testing all 255.
 - Opening the export assistant could stop the music: reading the ROM (unpacking the zip, hashing it,
   looking it up in the openMSX database) ran on the window thread, the audio device ran dry, and a
   source that ran dry stayed stopped. The ROM is now read on a worker thread and the player starts a

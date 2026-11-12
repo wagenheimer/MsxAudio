@@ -170,7 +170,14 @@ internal sealed class Cartridge
     /// </summary>
     internal static RomMapper DetectMapper(byte[] rom)
     {
-        if (rom.Length < 0x10000 || (rom.Length == 0x10000 && !(rom[0] == 'A' && rom[1] == 'B')))
+        // Up to 32 KB fits the 0x4000-0xBFFF window: nothing to bank. From there to 64 KB openMSX also
+        // says "not banked", but a 40, 48 or 56 KB image cannot sit in that window: the SCC release of
+        // Knightmare (56 KB = seven 8 KB banks) starts by writing to the bank registers and runs from
+        // the new bank. So those sizes are looked at too, and stay linear only if nothing writes a
+        // bank register.
+        bool bankable = rom.Length > 0x8000 && rom.Length < 0x10000;
+
+        if (!bankable && (rom.Length < 0x10000 || (rom.Length == 0x10000 && !(rom[0] == 'A' && rom[1] == 'B'))))
             return RomMapper.Linear;
 
         int konamiScc = 0, konami = 0, ascii8 = 0, ascii16 = 0;
@@ -223,6 +230,9 @@ internal sealed class Cartridge
         Consider(RomMapper.Konami, konami);
         Consider(RomMapper.Ascii8, ascii8);
         Consider(RomMapper.Ascii16, ascii16);
+
+        if (bankable && bestVotes == 0)
+            return RomMapper.Linear;                 // an odd size that never switches a bank: a plain ROM
 
         return best;
     }

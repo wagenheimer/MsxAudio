@@ -346,6 +346,12 @@ public static class RomSoundScan
         int done = 0;
         int found = 0;
 
+        // A routine that makes no sound for any of the first ids is the wrong routine (or the wrong
+        // way to call it); the rest of the table will not be any better. Give up instead of spending
+        // minutes proving it.
+        const int GiveUpAfter = 48;
+        bool gaveUp = false;
+
         var parallel = new ParallelOptions
         {
             CancellationToken = token,
@@ -357,12 +363,20 @@ public static class RomSoundScan
             Parallel.For(0, total, parallel, index =>
             {
                 int id = options.FirstId + index;
-                RomScanSong? song = ScanOne(rom, mapper, options, routine, bank, mode, id, block, token);
+                RomScanSong? song = Volatile.Read(ref gaveUp)
+                    ? null
+                    : ScanOne(rom, mapper, options, routine, bank, mode, id, block, token);
                 results[index] = new IdResult(id, song);
 
                 int finished = Interlocked.Increment(ref done);
                 if (song is not null)
                     Interlocked.Increment(ref found);
+
+                if (finished >= GiveUpAfter && Volatile.Read(ref found) == 0 && !Volatile.Read(ref gaveUp))
+                {
+                    Volatile.Write(ref gaveUp, true);
+                    log?.Invoke($"  none of the first {finished} ids made a sound: this is not the sound routine, giving up");
+                }
 
                 progress?.Invoke(routineSearched ? 35 + finished * 65 / total : finished,
                     routineSearched ? 100 : total);

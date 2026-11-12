@@ -70,6 +70,7 @@ public sealed class MiniMsx
     private long _tStatesAtBase;
     private byte _psgLatch;
     private byte _vdpStatus;
+    private int _emptyStatusReads;
     private byte _slotRegister;
     private byte _portC = 0x50;
     private byte _joystick = 0xFF;   // PSG port A, active low (1 = released)
@@ -271,6 +272,7 @@ public sealed class MiniMsx
         // VDP vblank: status bit 7 is latched until the status port is read, and the BIOS mirrors
         // it in STATFL (0xF3E7), which many drivers test instead of reading the port.
         _vdpStatus = 0x80;
+        _emptyStatusReads = 0;
         _ram[0xF3E7] = 0x80;
 
         // MSX JIFFY counter (0xFC9E): some drivers use it as a tempo divider.
@@ -296,9 +298,15 @@ public sealed class MiniMsx
                 CallHook(TimerHook, hookBudget);
         }
 
-        // Games whose music starts in the main program (not in a hook) need it to keep running.
+        // Games whose music starts in the main program (not in a hook) need it to keep running. It
+        // gets what a real Z80 has in one frame (3.58 MHz / 60 = ~60,000 T-states, hooks included):
+        // a game that spins waiting for the next frame used to burn the whole 200,000-instruction
+        // budget here, 13 times what the hardware could run, and that made scans take minutes.
         if (_mainRunning)
-            Run(_cpu, Math.Max(2000, maxInstructions - hookBudget * 2));
+        {
+            long frameCycles = (long)(3_579_545.0 / Math.Max(1.0, RefreshRate));
+            Run(_cpu, Math.Max(2000, maxInstructions - hookBudget * 2), _tStatesAtBase + frameCycles);
+        }
 
         _sample += SamplesPerFrame;
     }
@@ -413,7 +421,7 @@ public sealed class MiniMsx
     }
 
     /// <summary>Executes the main program for up to <paramref name="maxInstructions"/> instructions.</summary>
-    private void Run(Z80Processor cpu, int maxInstructions)
+    private void Run(Z80Processor cpu, int maxInstructions, long cycleLimit = long.MaxValue)
     {
         var registers = (Z80Registers)cpu.Registers;
         _halted = false;
@@ -436,6 +444,9 @@ public sealed class MiniMsx
                 _halted = false;
                 return;
             }
+
+            if (_tStates >= cycleLimit)
+                return;                                       // the frame is over: the next one starts the vblank
         }
     }
 
@@ -930,6 +941,20 @@ public sealed class MiniMsx
     {
         byte value = _vdpStatus;
         _vdpStatus &= 0x7F;
+
+        // A game that reads the status again and again with the vblank flag already taken is waiting
+        // for the next frame (a spin loop instead of HALT). Nothing will change until then, so the
+        // rest of this frame's slice is idle time, exactly like a HALT: without this every such frame
+        // burned its whole instruction budget doing nothing, which made scans take minutes.
+        if ((value & 0x80) == 0)
+        {
+            if (++_emptyStatusReads >= 3)
+                _halted = true;
+        }
+        else
+        {
+            _emptyStatusReads = 0;
+        }
 
         // The BIOS stores the last status in STATFL (0xF3E7); drivers test it instead of the port.
         _ram[0xF3E7] = value;
