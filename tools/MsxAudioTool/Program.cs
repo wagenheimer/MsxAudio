@@ -61,7 +61,7 @@ internal static class Program
                     drive openMSX to record a ROM's VGMs and build the package
               extract-direct <rom> <out.msxaudio> --profile profile.json
                     run the cartridge driver in process (no external emulator, experimental)
-              scan <rom> <out.msxaudio> [--ids 1-63] [--call ADDR] [--bank N] [--id-reg A|HL|DE|BC]
+              scan <rom> <out.msxaudio> [--ids 1-255] [--call ADDR] [--bank N] [--id-reg A|HL|DE|BC]
                     [--player ADDR] [--profile p.json] [--refresh 50|60] [--seconds N]
                     try every sound id, keep what produces sound (no profile needed)
               probe <rom> [--mapper M] [--refresh 50|60]
@@ -180,12 +180,12 @@ internal static class Program
     private static int Scan(string[] args)
     {
         if (args.Length < 2)
-            return Usage("scan <rom> <out.msxaudio> [--ids 1-63] [--call ADDR] [--player ADDR] [--profile p.json]");
+            return Usage("scan <rom> <out.msxaudio> [--ids 1-255] [--call ADDR] [--player ADDR] [--profile p.json]");
 
         var profile = args.Any(a => a == "--profile") ? LoadProfile(args) : null;
 
         int firstId = profile is { Ids.Count: > 0 } ? profile.Ids.Min() : 1;
-        int lastId = profile is { Ids.Count: > 0 } ? profile.Ids.Max() : 63;
+        int lastId = profile is { Ids.Count: > 0 } ? profile.Ids.Max() : 255;
 
         if (Value(args, "--ids") is { Length: > 0 } range && TryParseRange(range, out int first, out int last))
         {

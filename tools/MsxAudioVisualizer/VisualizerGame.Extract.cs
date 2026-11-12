@@ -409,7 +409,7 @@ public sealed partial class VisualizerGame : Game
 
         // The profile's own ids bound the scan (and skip the ids its table does not have).
         int firstId = 1;
-        int lastId = 63;
+        int lastId = 255;
         if (profile is { Ids.Count: > 0 })
         {
             firstId = int.MaxValue;
@@ -1198,22 +1198,32 @@ public sealed partial class VisualizerGame : Game
         }
     }
 
-    /// <summary>
-    /// Opens the output folder in the file manager. A folder that does not exist yet (nothing was
-    /// extracted so far) falls back to its closest existing parent.
-    /// </summary>
+    /// <summary>Opens the extraction output folder in the file manager.</summary>
     private void OpenOutputFolder()
     {
         string folder = OutputFolder();
-
-        while (folder.Length > 0 && !Directory.Exists(folder))
-            folder = Path.GetDirectoryName(folder) ?? string.Empty;
 
         if (folder.Length == 0)
         {
             _extractError = "CHOOSE A ROM OR AN OUTPUT FOLDER FIRST";
             return;
         }
+
+        _extractError = OpenInFileManager(folder);
+    }
+
+    /// <summary>
+    /// Shows <paramref name="folder"/> in the system file manager. A folder that does not exist yet
+    /// (nothing was extracted so far) falls back to its closest existing parent. Returns an error
+    /// message, or <c>null</c> when it worked.
+    /// </summary>
+    private static string? OpenInFileManager(string folder)
+    {
+        while (folder.Length > 0 && !Directory.Exists(folder))
+            folder = Path.GetDirectoryName(folder) ?? string.Empty;
+
+        if (folder.Length == 0)
+            return "NO FOLDER TO OPEN";
 
         try
         {
@@ -1227,10 +1237,11 @@ public sealed partial class VisualizerGame : Game
                 start.ArgumentList.Add(folder);
 
             System.Diagnostics.Process.Start(start);
+            return null;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            _extractError = "CANNOT OPEN THE FOLDER: " + ex.Message.ToUpperInvariant();
+            return "CANNOT OPEN THE FOLDER: " + ex.Message.ToUpperInvariant();
         }
     }
 

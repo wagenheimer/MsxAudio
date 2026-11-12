@@ -251,6 +251,17 @@ public sealed class MiniMsx
         return InterruptHook != 0;
     }
 
+    /// <summary>
+    /// True while the main program (not only the interrupt hooks) is stepped every frame. Turning it
+    /// off keeps the sound driver running but freezes the game logic: no title-screen timer, no demo
+    /// starting by itself, nothing but what was asked for.
+    /// </summary>
+    public bool MainRunning
+    {
+        get => _mainRunning;
+        set => _mainRunning = value;
+    }
+
     /// <summary>Runs the game's interrupt handlers and the main program for one frame.</summary>
     public void Frame(int maxInstructions = 200_000)
     {
@@ -467,8 +478,29 @@ public sealed class MiniMsx
         main.HL = unchecked((short)hl);
         main.DE = unchecked((short)de);
         main.BC = unchecked((short)bc);
-        Call(routine, maxInstructions);
+
+        // Our own call must get through even when the game's calls to the same routine are blocked.
+        _allowBlocked = true;
+        try
+        {
+            Call(routine, maxInstructions);
+        }
+        finally
+        {
+            _allowBlocked = false;
+        }
     }
+
+    private ushort _blockedRoutine;
+    private bool _allowBlocked;
+
+    /// <summary>
+    /// Makes the game's own calls to the sound routine do nothing (an immediate <c>RET</c>), while
+    /// <see cref="TriggerSound"/> still works. A game on its title screen starts its own music a few
+    /// seconds after boot (a timer in its interrupt handler): that music would replace, or mix with,
+    /// whatever the scan asked for. 0 turns the block off.
+    /// </summary>
+    public void BlockGameCalls(ushort routine) => _blockedRoutine = routine;
 
     /// <summary>Presses or releases a key in the matrix (row 0..8, mask bit 0..7; row 0x0F = joystick).</summary>
     public void PressKey(int row, int mask, bool pressed)
@@ -582,6 +614,14 @@ public sealed class MiniMsx
         ushort pc = registers.PC;
 
         PcTrace?.Invoke(pc);
+
+        if (pc == _blockedRoutine && _blockedRoutine != 0 && !_allowBlocked)
+        {
+            // The game calls the (blocked) sound routine: behave as if it returned straight away.
+            registers.PC = ReadWord((ushort)registers.SP);
+            registers.SP += 2;
+            return;
+        }
 
         if (pc < 0x4000 && SlotOf(0) == 0 && TryBios(registers, pc))
             return;

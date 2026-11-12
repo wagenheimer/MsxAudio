@@ -23,12 +23,15 @@ public sealed partial class VisualizerGame : Game
     private CancellationTokenSource? _listCts;
     private bool _listScanning;
     private string? _listSelectPath;
+    private string? _listSelectSong;          // song id inside the package (many tracks share one file)
     private string? _scanError;
     private volatile int _listScanProgress;
     // Playlist viewport: the first visible row and the scrollbar geometry (design coordinates).
     private int _playlistFirst;
     private int _playlistRows;
     private int _playlistLastSelected = -1;
+    private int _cursor;                      // row the keyboard is on (the playing track is _selected)
+    private bool _browsePlays;                // play every row the cursor lands on (T)
     private Rectangle _playlistRect;
     private Rectangle _playlistScrollTrack;
     private Rectangle _playlistScrollThumb;
@@ -93,11 +96,12 @@ public sealed partial class VisualizerGame : Game
 
         if (_listSelectPath is not null)
         {
-            int found = _tracks.FindIndex(t => string.Equals(t.Path, _listSelectPath, StringComparison.OrdinalIgnoreCase));
+            int found = FindTrack(_listSelectPath, _listSelectSong);
             if (found >= 0)
                 _selected = found;
 
             _listSelectPath = null;
+            _listSelectSong = null;
         }
         else
         {
@@ -223,11 +227,14 @@ public sealed partial class VisualizerGame : Game
 
             if (!rescan)
             {
-                int found = _tracks.FindIndex(t => string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase));
+                int found = FindTrack(path, songId);
                 if (found >= 0)
                     _selected = found;
                 else if (_listScanning)
+                {
                     _listSelectPath = path;
+                    _listSelectSong = songId;
+                }
             }
             else if (!string.Equals(folder, _scanRoot, StringComparison.OrdinalIgnoreCase))
             {
@@ -239,11 +246,14 @@ public sealed partial class VisualizerGame : Game
             else
             {
                 // Same folder: just move the selection (the scan may still be running).
-                int found = _tracks.FindIndex(t => string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase));
+                int found = FindTrack(path, songId);
                 if (found >= 0)
                     _selected = found;
                 else if (_listScanning)
+                {
                     _listSelectPath = path;
+                    _listSelectSong = songId;
+                }
             }
 
             Console.WriteLine($"[MSXScope] loaded {path}{(songId is null ? "" : "#" + songId)} events={vgm.Events.Count} len={vgm.TotalSeconds:0.0}s");
@@ -262,16 +272,39 @@ public sealed partial class VisualizerGame : Game
         }
     }
 
+    /// <summary>
+    /// Index of a track by file and, for a <c>.msxaudio</c> package, by song: every song of a package
+    /// shares the same file, so matching the path alone always lands on the package's first song.
+    /// When the song is unknown the first track of the file is used.
+    /// </summary>
+    private int FindTrack(string path, string? songId)
+    {
+        if (songId is not null)
+        {
+            int exact = _tracks.FindIndex(t =>
+                string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(t.SongId, songId, StringComparison.OrdinalIgnoreCase));
+
+            if (exact >= 0)
+                return exact;
+        }
+
+        return _tracks.FindIndex(t => string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>Moves the viewport so the selected row is visible.</summary>
-    private void EnsureSelectedVisible()
+    private void EnsureSelectedVisible() => EnsureVisible(_selected);
+
+    /// <summary>Scrolls the list just enough to show row <paramref name="index"/>.</summary>
+    private void EnsureVisible(int index)
     {
         if (_playlistRows <= 0)
             return;
 
-        if (_selected < _playlistFirst)
-            _playlistFirst = _selected;
-        else if (_selected >= _playlistFirst + _playlistRows)
-            _playlistFirst = _selected - _playlistRows + 1;
+        if (index < _playlistFirst)
+            _playlistFirst = index;
+        else if (index >= _playlistFirst + _playlistRows)
+            _playlistFirst = index - _playlistRows + 1;
 
         _playlistFirst = Math.Clamp(_playlistFirst, 0, Math.Max(0, _tracks.Count - _playlistRows));
     }
@@ -306,6 +339,10 @@ public sealed partial class VisualizerGame : Game
 
         Text("TRACKS", x + 10, y + 8, Accent);
 
+        // "61 SONGS IN 1 PACK": says when one file holds many songs (a .msxaudio pack).
+        if (_tracks.Count > 0)
+            Text(FitText(DescribeEntries(_tracks).Trim('(', ')'), w - 130), x + 64, y + 8, Dim);
+
         // Open-folder button in the panel header.
         _openFolderHit = new Rectangle(x + w - 54, y + 3, 44, 15);
         DrawButton(_openFolderHit, "OPEN", false, Accent);
@@ -327,10 +364,13 @@ public sealed partial class VisualizerGame : Game
         if (_selected != _playlistLastSelected)
         {
             _playlistLastSelected = _selected;
+            _cursor = _selected;
             EnsureSelectedVisible();
         }
 
+        _cursor = Clamp0(_cursor);
         int first = _playlistFirst;
+        Point mouse = MouseDesign();
 
         _trackHit.Clear();
 
@@ -338,38 +378,62 @@ public sealed partial class VisualizerGame : Game
         {
             int index = first + i;
             int rowY = listTop + i * 18;
-            bool active = index == _selected;
+            bool active = index == _selected;           // the track that is playing
+            bool atCursor = index == _cursor;           // where the keyboard is
             var entry = _tracks[index];
 
+            var rowRect = new Rectangle(x + 4, rowY - 5, w - 22, 18);
+            bool hover = rowRect.Contains(mouse) && _dialog == DialogKind.None;
+
+            // Playing row: filled. Cursor row: outlined in the accent colour. Mouse row: faint fill.
             if (active)
                 Rect(x + 6, rowY - 4, w - 18, 17, PanelHi);
+            else if (hover)
+                Rect(x + 6, rowY - 4, w - 18, 17, Color.Lerp(PanelColor, PanelHi, 0.5f));
 
-            _trackHit.Add((new Rectangle(x + 4, rowY - 5, w - 22, 18), index));
+            if (atCursor)
+            {
+                Rect(x + 6, rowY - 4, w - 18, 1, Accent);
+                Rect(x + 6, rowY + 12, w - 18, 1, Accent);
+                Rect(x + 6, rowY - 4, 1, 17, Accent);
+                Rect(x + w - 13, rowY - 4, 1, 17, Accent);
+            }
 
+            _trackHit.Add((rowRect, index));
+
+            // Songs that live in the same .msxaudio pack share a coloured stripe on the left.
+            if (entry.SongId is not null)
+                Rect(x + 7, rowY - 3, 2, 15, PackColor(entry.Source));
+
+            // ">" marks the playing track, so it stays findable even when the cursor is elsewhere.
+            if (active)
+                Text(">", x + 10, rowY, Accent);
+
+            const int nameOffset = 22;
             string name = entry.Name.ToUpperInvariant();
-            int maxName = _settings.Recursive ? 18 : 24;
+            int maxName = _settings.Recursive ? 16 : 22;
             if (name.Length > maxName)
                 name = name[..maxName];
 
-            Text(name, x + 12, rowY, active ? Accent : TextColor);
+            Text(name, x + nameOffset, rowY, active ? Accent : atCursor ? TextColor : TextColor);
 
             if (_settings.Recursive)
             {
                 string folder = Path.GetFileName(entry.Folder).ToUpperInvariant();
                 if (folder.Length > 9)
                     folder = folder[..9];
-                Text(folder, x + 12 + (maxName + 2) * 6, rowY, Dim);
+                Text(folder, x + nameOffset + (maxName + 2) * 6, rowY, Dim);
             }
             else if (entry.SongId is not null)
             {
                 // Song from a .msxaudio package: show which package it came from.
                 string source = Path.GetFileNameWithoutExtension(entry.Source ?? string.Empty).ToUpperInvariant();
-                int room = Math.Max(0, (w - 60) / 6 - maxName - 2);
+                int room = Math.Max(0, (w - 60) / 6 - maxName - 4);
                 if (source.Length > room)
                     source = room > 1 ? source[..(room - 1)] + "…" : string.Empty;
 
                 if (source.Length > 0)
-                    Text(source, x + 12 + (maxName + 2) * 6, rowY, Dim);
+                    Text(source, x + nameOffset + (maxName + 2) * 6, rowY, Dim);
             }
 
             if (entry.Seconds is double seconds)
@@ -436,6 +500,14 @@ public sealed partial class VisualizerGame : Game
         if (folderPath.Length > 29)
             folderPath = "…" + folderPath[^28..];
         Text(folderPath, x + 10, listY + 34, Dim);
+
+        // How the keyboard works here, and where the cursor is.
+        if (_tracks.Count > 0)
+        {
+            string hint = $"ROW {_cursor + 1}/{_tracks.Count} UP/DN MOVE ENTER PLAYS T:AUTO " +
+                          (_browsePlays ? "ON" : "OFF");
+            Text(hint, x + 10, listY + 48, _browsePlays ? Accent : Dim);
+        }
     }
 
     private void DrawEmpty()

@@ -16,6 +16,40 @@ public sealed partial class VisualizerGame : Game
 {
     private bool Pressed(Keys key) => _keys.IsKeyDown(key) && !_prevKeys.IsKeyDown(key);
 
+    private Keys _repeatKey;
+    private long _repeatAt;
+
+    /// <summary>True on the press and then again, repeating, while the key is held (list navigation).</summary>
+    private bool PressedRepeat(Keys key)
+    {
+        if (!_keys.IsKeyDown(key))
+        {
+            if (_repeatKey == key)
+                _repeatKey = Keys.None;
+
+            return false;
+        }
+
+        long now = Environment.TickCount64;
+
+        if (!_prevKeys.IsKeyDown(key))
+        {
+            _repeatKey = key;
+            _repeatAt = now + 350;
+            return true;
+        }
+
+        if (_repeatKey == key && now >= _repeatAt)
+        {
+            _repeatAt = now + 45;
+            return true;
+        }
+
+        return false;
+    }
+
+    private int Clamp0(int index) => Math.Clamp(index, 0, Math.Max(0, _tracks.Count - 1));
+
     private Point MouseDesign()
     {
         if (_scale <= 0) return Point.Zero;
@@ -58,27 +92,55 @@ public sealed partial class VisualizerGame : Game
                 OpenProfileDialog();
         }
 
-        if (Pressed(Keys.Up) && _tracks.Count > 0)
+        // The keyboard drives the track list: a cursor moves through it (held keys repeat) and
+        // ENTER plays the row under the cursor. The playing track and the song position are not
+        // touched while browsing, unless "play on move" (T) is on.
+        if (_tracks.Count > 0)
         {
-            _selected = (_selected - 1 + _tracks.Count) % _tracks.Count;
-            LoadTrack(_selected);
+            int page = Math.Max(1, _playlistRows - 2);
+            int move = 0;
+
+            if (PressedRepeat(Keys.Up)) move = -1;
+            else if (PressedRepeat(Keys.Down)) move = 1;
+            else if (PressedRepeat(Keys.PageUp)) move = -page;
+            else if (PressedRepeat(Keys.PageDown)) move = page;
+
+            if (move != 0)
+            {
+                bool single = Math.Abs(move) == 1;
+                _cursor = single
+                    ? (Clamp0(_cursor) + move + _tracks.Count) % _tracks.Count
+                    : Math.Clamp(Clamp0(_cursor) + move, 0, _tracks.Count - 1);
+                EnsureVisible(_cursor);
+
+                if (_browsePlays)
+                    LoadTrack(_cursor);
+            }
+
+            if (Pressed(Keys.Home))
+            {
+                _cursor = 0;
+                EnsureVisible(_cursor);
+                if (_browsePlays) LoadTrack(_cursor);
+            }
+
+            if (Pressed(Keys.End))
+            {
+                _cursor = _tracks.Count - 1;
+                EnsureVisible(_cursor);
+                if (_browsePlays) LoadTrack(_cursor);
+            }
+
+            if (Pressed(Keys.Enter))
+                LoadTrack(Clamp0(_cursor));
         }
 
-        if (Pressed(Keys.Down) && _tracks.Count > 0)
+        if (Pressed(Keys.T))
         {
-            _selected = (_selected + 1) % _tracks.Count;
-            LoadTrack(_selected);
+            _browsePlays = !_browsePlays;
+            _status = _browsePlays ? "PLAY ON MOVE: ON" : "PLAY ON MOVE: OFF (ENTER PLAYS)";
+            _statusTimer = 2f;
         }
-
-        if (Pressed(Keys.Enter) && _tracks.Count > 0)
-            LoadTrack(_selected);
-
-        // Page keys move the playlist viewport without changing the current track.
-        if (Pressed(Keys.PageUp))
-            ScrollPlaylist(-Math.Max(1, _playlistRows - 2));
-
-        if (Pressed(Keys.PageDown))
-            ScrollPlaylist(Math.Max(1, _playlistRows - 2));
 
         if (Pressed(Keys.Space))
             TogglePause();

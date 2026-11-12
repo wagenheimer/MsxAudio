@@ -396,7 +396,7 @@ public sealed partial class VisualizerGame : Game
 
     private void DrawHelp()
     {
-        const int w = 660, h = 462;
+        const int w = 660, h = 504;
         int x = (VW - w) / 2, y = (VH - h) / 2;
         Panel(x, y, w, h, PanelHi);
         Rect(x, y, w, 24, PanelColor);
@@ -410,8 +410,10 @@ public sealed partial class VisualizerGame : Game
             "TAB / HEADER   SPECTRUM / PIANO ROLL / PIANO",
             "F2 / CTRL+O    OPEN FOLDER (RECURSIVE OPTION)",
             "F3             EXTRACT MUSIC FROM A CARTRIDGE",            "F5             RESCAN THE CURRENT FOLDER",
-            "UP / DOWN      SELECT AND PLAY A TRACK",
-            "PAGE UP/DOWN   SCROLL THE TRACK LIST",
+            "UP / DOWN      MOVE THE TRACK CURSOR (HOLD TO REPEAT)",
+            "PAGE UP/DOWN   MOVE THE CURSOR A PAGE · HOME / END",
+            "ENTER / CLICK  PLAY THE TRACK UNDER THE CURSOR",
+            "T              PLAY EVERY ROW THE CURSOR LANDS ON",
             "WHEEL          SCROLL THE TRACK LIST",
             "SPACE          PAUSE / RESUME",
             "LEFT / RIGHT   SEEK -/+ 5 S",

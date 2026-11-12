@@ -41,8 +41,18 @@ public sealed class RomScanOptions
     /// <summary>First id to try.</summary>
     public int FirstId { get; init; } = 1;
 
-    /// <summary>Last id to try (the King's Valley table, for instance, ends at 32).</summary>
-    public int LastId { get; init; } = 63;
+    /// <summary>Last id to try. Tables vary: King's Valley ends at 32, Penguin Adventure's music goes past 120.</summary>
+    public int LastId { get; init; } = 255;
+
+    /// <summary>
+    /// Ignore the game's own calls to the sound routine while scanning. A game on its title screen
+    /// starts its own music a few seconds after boot, and that music replaces or mixes with the id
+    /// being tested. The scan's own calls always go through.
+    /// </summary>
+    public bool BlockGameCalls { get; init; } = true;
+
+    /// <summary>A sound is over when nothing audible was written for this long.</summary>
+    public double EndSilenceSeconds { get; init; } = 1.5;
 
     /// <summary>Capture length per id that produces sound.</summary>
     public double SecondsPerId { get; init; } = 12;
@@ -261,87 +271,42 @@ public static class RomSoundScan
         log?.Invoke($"mapper={RomMapperNames.Name(mapper)}{(scc ? " +SCC" : "")}, sound call={routine:X4}, " +
                     $"{machine.FramesPerSecond} Hz");
 
+        int total = Math.Max(1, options.LastId - options.FirstId + 1);
+        bool block = options.BlockGameCalls && options.PlayerAddress == 0;
+
+        List<IdResult> results = ScanIds(rom, requested, options, routine, bank, mode, block, total, log, progress,
+            routineSearched, token);
+
+        // The routine may be the game's own per-frame tick: blocking its calls would silence everything.
+        // Nothing found with the block on means it is not safe, so try again without it.
+        if (block && results.All(r => r.Song is null))
+        {
+            log?.Invoke("nothing played with the game's own sound calls blocked: trying again without the block");
+            results = ScanIds(rom, requested, options, routine, bank, mode, false, total, log, progress,
+                routineSearched, token);
+        }
+
         var songs = new List<RomScanSong>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         int duplicates = 0;
-        int total = Math.Max(1, options.LastId - options.FirstId + 1);
-        int done = 0;
-        int fps = machine.FramesPerSecond;
 
-        for (int id = options.FirstId; id <= options.LastId; id++)
+        foreach (IdResult result in results)
         {
-            token.ThrowIfCancellationRequested();
-
-            if (options.StopId != 0)
-            {
-                Trigger(machine, routine, bank, options.StopId, mode);
-                RunFrames(machine, options, 3);
-            }
-
-            foreach (int address in options.ResetAddresses)
-                machine.Write((ushort)address, 0x00);
-
-            machine.ResetCapture();
-            Trigger(machine, routine, bank, id | options.IdMask, mode);
-
-            int failFrames = Math.Max(1, (int)Math.Round(options.FailureSeconds * fps));
-            int frames = Math.Max(1, (int)Math.Round(options.SecondsPerId * fps));
-            int produced = 0;
-
-            for (int frame = 0; frame < frames; frame++)
-            {
-                Step(machine, options);
-
-                if (frame == failFrames && machine.PitchWriteCount < options.MinNoteWrites)
-                    break;
-
-                produced = machine.PitchWriteCount;
-            }
-
-            progress?.Invoke(routineSearched ? 35 + ++done * 65 / total : ++done, routineSearched ? 100 : total);
-
-            if (produced < options.MinNoteWrites)
+            if (result.Song is not { } song)
                 continue;
-
-            var vgm = machine.BuildVgm($"id_{id:00}", frames * machine.SamplesPerFrame);
 
             // Two ids that produce the same stream are the same sound (aliases in the table).
-            string signature = Signature(vgm);
-            if (!seen.Add(signature))
+            if (!seen.Add(Signature(song.Vgm)))
             {
                 duplicates++;
-                log?.Invoke($"  id {id,2}: duplicate, skipped");
+                log?.Invoke($"  id {song.Id,3}: duplicate, skipped");
                 continue;
             }
 
-            (double Start, double Duration)? loop = null;
-            if (vgm.HasLoop && vgm.LoopSeconds >= 2)
-            {
-                loop = (vgm.LoopStartSeconds, vgm.LoopSeconds);
-            }
-            else if (VgmLoopFinder.Find(vgm, Math.Max(3, options.SecondsPerId / 4)) is { } foundLoop &&
-                     foundLoop.Duration >= 2)
-            {
-                vgm.SetLoop(foundLoop.Start, foundLoop.Duration);
-                loop = foundLoop;
-            }
-
-            // Music = repeats (loop) or keeps sounding until the end of the capture. An effect is a
-            // burst followed by silence; the caller can always rename/reclassify in the package.
-            bool music = loop is not null || StillPlaying(vgm);
-            songs.Add(new RomScanSong
-            {
-                Id = id,
-                Vgm = vgm,
-                Music = music,
-                NoteWrites = produced,
-                Loop = loop is not null,
-                LoopStart = loop?.Start ?? 0,
-                LoopSeconds = loop?.Duration ?? 0,
-            });
-
-            log?.Invoke($"  id {id,2}: {(music ? "music" : "sfx  ")}, {produced,5} pitch" +
-                        (loop is { } l ? $", loop {l.Start:0.000}s + {l.Duration:0.000}s" : ""));
+            songs.Add(song);
+            log?.Invoke($"  id {song.Id,3}: {(song.Music ? "music" : "sfx  ")}, {song.Vgm.TotalSeconds,5:0.0}s, " +
+                        $"{song.NoteWrites,5} pitch" +
+                        (song.Loop ? $", loop {song.LoopStart:0.000}s + {song.LoopSeconds:0.000}s" : ""));
         }
 
         progress?.Invoke(1, 1);
@@ -360,6 +325,153 @@ public static class RomSoundScan
             Diagnosis = notes.Concat(machine.Diagnose()).ToList(),
         };
     }
+
+    private readonly record struct IdResult(int Id, RomScanSong? Song);
+
+    /// <summary>
+    /// Tries every id on its own machine, side by side. A fresh machine per id means a sound never
+    /// starts in the middle of the previous one, and the order of the ids does not matter.
+    /// </summary>
+    private static List<IdResult> ScanIds(byte[] rom, RomMapper mapper, RomScanOptions options, ushort routine,
+        int bank, SoundIdMode mode, bool block, int total, Action<string>? log, Action<int, int>? progress,
+        bool routineSearched, CancellationToken token)
+    {
+        var results = new IdResult[total];
+        int done = 0;
+        int found = 0;
+
+        var parallel = new ParallelOptions
+        {
+            CancellationToken = token,
+            MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1),
+        };
+
+        try
+        {
+            Parallel.For(0, total, parallel, index =>
+            {
+                int id = options.FirstId + index;
+                RomScanSong? song = ScanOne(rom, mapper, options, routine, bank, mode, id, block, token);
+                results[index] = new IdResult(id, song);
+
+                int finished = Interlocked.Increment(ref done);
+                if (song is not null)
+                    Interlocked.Increment(ref found);
+
+                progress?.Invoke(routineSearched ? 35 + finished * 65 / total : finished,
+                    routineSearched ? 100 : total);
+
+                if (finished % 16 == 0 || finished == total)
+                    log?.Invoke($"  tested {finished}/{total} ids, {Volatile.Read(ref found)} with sound so far");
+            });
+        }
+        catch (AggregateException ex) when (ex.InnerException is OperationCanceledException cancelled)
+        {
+            throw cancelled;
+        }
+
+        return results.ToList();
+    }
+
+    /// <summary>One id on a fresh machine: records until the sound is over (or the limit), then trims.</summary>
+    private static RomScanSong? ScanOne(byte[] rom, RomMapper mapper, RomScanOptions options, ushort routine,
+        int bank, SoundIdMode mode, int id, bool block, CancellationToken token)
+    {
+        MiniMsx machine = NewMachine(rom, mapper, options);
+        machine.Boot();
+
+        if (block)
+            machine.BlockGameCalls(routine);
+
+        int fps = machine.FramesPerSecond;
+        RunFrames(machine, options, 10);
+
+        if (options.StopId != 0)
+        {
+            Trigger(machine, routine, bank, options.StopId, mode);
+            RunFrames(machine, options, 3);
+        }
+
+        foreach (int address in options.ResetAddresses)
+            machine.Write((ushort)address, 0x00);
+
+        machine.ResetCapture();
+        Trigger(machine, routine, bank, id | options.IdMask, mode);
+
+        int maxFrames = Math.Max(1, (int)Math.Round(options.SecondsPerId * fps));
+        int failFrames = Math.Max(1, (int)Math.Round(options.FailureSeconds * fps));
+        int endFrames = Math.Max(1, (int)Math.Round(options.EndSilenceSeconds * fps));
+        int tailFrames = (int)Math.Round(0.4 * fps);
+
+        int seen = 0;
+        int lastActive = -1;
+        bool ended = false;
+        int frame;
+
+        for (frame = 0; frame < maxFrames; frame++)
+        {
+            token.ThrowIfCancellationRequested();
+            Step(machine, options);
+
+            IReadOnlyList<VgmEvent> events = machine.CapturedEvents;
+            for (; seen < events.Count; seen++)
+            {
+                if (IsAudible(events[seen]))
+                    lastActive = frame;
+            }
+
+            if (frame == failFrames && machine.PitchWriteCount < options.MinNoteWrites)
+                return null;
+
+            if (lastActive >= 0 && frame - lastActive >= endFrames)
+            {
+                ended = true;
+                break;
+            }
+        }
+
+        int produced = machine.PitchWriteCount;
+        if (produced < options.MinNoteWrites)
+            return null;
+
+        // A sound that ended on its own is cut shortly after its last note; one that was still going
+        // when the limit came keeps the whole capture.
+        int keepFrames = ended ? Math.Min(frame + 1, lastActive + tailFrames + 1) : maxFrames;
+        VgmFile vgm = machine.BuildVgm($"id_{id:00}", keepFrames * machine.SamplesPerFrame);
+
+        (double Start, double Duration)? loop = null;
+        if (vgm.HasLoop && vgm.LoopSeconds >= 2)
+        {
+            loop = (vgm.LoopStartSeconds, vgm.LoopSeconds);
+        }
+        else if (!ended && VgmLoopFinder.Find(vgm, Math.Max(3, options.SecondsPerId / 4)) is { } foundLoop &&
+                 foundLoop.Duration >= 2)
+        {
+            vgm.SetLoop(foundLoop.Start, foundLoop.Duration);
+            loop = foundLoop;
+        }
+
+        // Music = repeats, keeps sounding until the limit, or simply lasts (a jingle). An effect is a
+        // short burst. The caller can always rename or reclassify in the package.
+        bool music = loop is not null || (!ended && StillPlaying(vgm)) || vgm.TotalSeconds >= 5;
+
+        return new RomScanSong
+        {
+            Id = id,
+            Vgm = vgm,
+            Music = music,
+            NoteWrites = produced,
+            Loop = loop is not null,
+            LoopStart = loop?.Start ?? 0,
+            LoopSeconds = loop?.Duration ?? 0,
+        };
+    }
+
+    /// <summary>A write that makes sound: a PSG volume above zero, or an SCC volume above zero.</summary>
+    private static bool IsAudible(VgmEvent e) =>
+        e.Kind == VgmEventKind.Psg
+            ? e.P0 is >= 8 and <= 10 && (e.P1 & 0x0F) > 0
+            : e.P0 == 2 && (e.P2 & 0x0F) > 0;
 
     private static MiniMsx NewMachine(byte[] rom, RomMapper mapper, RomScanOptions options) =>
         new(rom, mapper)

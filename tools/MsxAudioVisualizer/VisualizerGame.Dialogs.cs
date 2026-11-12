@@ -44,6 +44,7 @@ public sealed partial class VisualizerGame : Game
     private readonly List<(Rectangle Rect, string Path)> _browserCrumbHit = new();
     private readonly List<(Rectangle Rect, string Path)> _browserRecentHit = new();
     private Rectangle _browserUpHit, _browserRecursiveHit, _browserPlayHit, _browserCancelHit, _browserCloseHit;
+    private Rectangle _browserOpenFolderHit, _browserRecentClearHit;
     private Rectangle _profileButtonHit;
 
     // Scrollbars of the two browser panes (design coordinates, filled while drawing).
@@ -500,6 +501,22 @@ public sealed partial class VisualizerGame : Game
             return;
         }
 
+        if (_browserOpenFolderHit.Contains(p))
+        {
+            string? error = OpenInFileManager(_browserDir);
+            if (error is not null)
+                _browserError = error;
+
+            return;
+        }
+
+        if (_browserRecentClearHit.Contains(p))
+        {
+            _settings.RecentFolders.Clear();
+            _settings.Save();
+            return;
+        }
+
         foreach (var (rect, path) in _browserRecentHit)
         {
             if (!rect.Contains(p))
@@ -729,14 +746,16 @@ public sealed partial class VisualizerGame : Game
             if (recents.Count >= 4)
                 break;
 
-            if (string.Equals(recent, _browserDir, StringComparison.OrdinalIgnoreCase))
+            // Not the folder we are in, and not one that no longer exists.
+            if (string.Equals(recent, _browserDir, StringComparison.OrdinalIgnoreCase) ||
+                !Directory.Exists(recent))
                 continue;
 
             recents.Add(recent);
         }
 
         int recentRows = recents.Count;
-        int recentH = recentRows > 0 ? recentRows * 18 + 26 : 0;
+        int recentH = recentRows > 0 ? recentRows * 18 + 34 : 0;
         int folderH = listH - recentH;
         int folderRows = Math.Max(3, folderH / 18);
         _browserFolderRows = folderRows;
@@ -749,7 +768,7 @@ public sealed partial class VisualizerGame : Game
         _browserDirFirst = Math.Clamp(_browserDirFirst, 0, Math.Max(0, _browserRows.Count - folderRows));
 
         Text("FOLDERS", leftX + 4, listTop - 12, _browserFocusFiles ? Dim : Accent);
-        Text($"{PatternLabel()} ({_browserFiles.Count})", rightX + 4, listTop - 12,
+        Text($"{PatternLabel()} {DescribeEntries(_browserFiles)}", rightX + 4, listTop - 12,
             _browserFocusFiles ? Accent : Dim);
 
         Rect(leftX, listTop, 1, folderH, Grid);
@@ -792,28 +811,31 @@ public sealed partial class VisualizerGame : Game
 
         // Recent folders (clickable).
         _browserRecentHit.Clear();
+        _browserRecentClearHit = Rectangle.Empty;
         if (recentRows > 0)
         {
-            int recentTop = listTop + folderH + 6;
-            Rect(leftX, recentTop - 14, leftW - 6, 1, Grid);
-            Text("RECENT", leftX + 4, recentTop - 10, Dim);
+            int recentTop = listTop + folderH + 18;
+            Rect(leftX, recentTop - 20, leftW - 6, 1, Grid);
+            Text("RECENT FOLDERS", leftX + 4, recentTop - 14, Accent);
+
+            // Forget the list (it only holds paths, nothing on disk is touched).
+            _browserRecentClearHit = new Rectangle(leftX + leftW - 62, recentTop - 18, 50, 14);
+            DrawButton(_browserRecentClearHit, "CLEAR", false, Dim);
 
             for (int i = 0; i < recentRows; i++)
             {
                 string path = recents[i];
                 int rowY = recentTop + i * 18;
+                var rowRect = new Rectangle(leftX, rowY - 4, leftW - 6, 18);
 
-                _browserRecentHit.Add((new Rectangle(leftX, rowY - 4, leftW - 6, 18), path));
+                if (rowRect.Contains(MouseDesign()))
+                    Rect(leftX + 2, rowY - 3, leftW - 10, 17, PanelHi);
 
-                string label = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar));
-                if (string.IsNullOrEmpty(label))
-                    label = path;
+                _browserRecentHit.Add((rowRect, path));
 
-                label = label.ToUpperInvariant();
-                if (label.Length > 22)
-                    label = label[..22];
-
-                Text(label, leftX + 8, rowY, TextColor);
+                // The whole path, from its end: "TEMP" alone could be any of a dozen folders.
+                Text(FitTextLeft(path.TrimEnd(Path.DirectorySeparatorChar).ToUpperInvariant(), leftW - 28),
+                    leftX + 8, rowY, TextColor);
             }
         }
 
@@ -833,11 +855,28 @@ public sealed partial class VisualizerGame : Game
 
             string name = entry.Name.ToUpperInvariant();
             int nameRoom = _browserRecursive ? 34 : 52;
+            bool inPack = entry.SongId is not null;
+
+            // A song that lives inside a .msxaudio pack: coloured stripe (one colour per pack), the
+            // pack's name after the song, and the "PACK" tag. A plain file has none of that.
+            if (inPack)
+            {
+                nameRoom = Math.Min(nameRoom, 18);
+                Rect(rightX + 2, rowY - 3, 3, 17, PackColor(entry.Source));
+            }
+
             if (name.Length > nameRoom) name = name[..nameRoom];
 
-            Text(name, rightX + 8, rowY, active && _browserFocusFiles ? Accent : TextColor);
+            Text(name, rightX + (inPack ? 12 : 8), rowY, active && _browserFocusFiles ? Accent : TextColor);
 
-            if (_browserRecursive)
+            if (inPack)
+            {
+                string pack = Path.GetFileName(entry.Source ?? string.Empty).ToUpperInvariant();
+                Text(FitText("IN " + pack, rightW - 200), rightX + 12 + 20 * 6, rowY, Dim);
+                Text("PACK", rightX + rightW - 70 - PixelFont.Measure("PACK"), rowY, PackColor(entry.Source));
+            }
+
+            if (_browserRecursive && !inPack)
             {
                 string folder = Path.GetFileName(entry.Folder).ToUpperInvariant();
                 if (folder.Length > 12) folder = folder[..12];
@@ -885,6 +924,10 @@ public sealed partial class VisualizerGame : Game
         _browserCancelHit = new Rectangle(dx + dw - 92, barY + 12, 76, 18);
         DrawButton(_browserCancelHit, "CANCEL", false, Dim);
 
+        // Show the folder being browsed in the system file manager.
+        _browserOpenFolderHit = new Rectangle(dx + dw - 292, barY + 12, 108, 18);
+        DrawButton(_browserOpenFolderHit, "OPEN FOLDER", false, Accent);
+
         _browserPlayHit = new Rectangle(dx + dw - 176, barY + 12, 76, 18);
         DrawButton(_browserPlayHit, _browserPick switch
         {
@@ -895,10 +938,51 @@ public sealed partial class VisualizerGame : Game
 
         Text(_browserPick switch
         {
-            BrowserPick.None => "ENTER PLAYS · BACKSPACE UP · F5 RESCAN",
+            BrowserPick.None => "ENTER PLAYS · BACKSPACE UP · F5 RESCAN · PACK = ONE .MSXAUDIO FILE WITH MANY SONGS",
             BrowserPick.Folder => "ENTER USES THIS FOLDER · BACKSPACE UP · F5 RESCAN",
             _ => "ENTER USES THIS FILE · BACKSPACE UP · F5 RESCAN",
         }, dx + 12, barY + 34, Dim);
+    }
+
+    private static readonly Color[] PackColors =
+    {
+        new(255, 176, 64), new(80, 200, 255), new(120, 230, 140),
+        new(200, 130, 255), new(255, 110, 140), new(240, 230, 90),
+    };
+
+    /// <summary>One stable colour per .msxaudio pack, so the songs of a pack read as a group.</summary>
+    private static Color PackColor(string? source)
+    {
+        int sum = 0;
+        foreach (char c in Path.GetFileName(source ?? string.Empty))
+            sum = sum * 31 + c;
+
+        return PackColors[(sum & 0x7FFFFFFF) % PackColors.Length];
+    }
+
+    /// <summary>"(63)" for plain files, "(2 FILES + 61 SONGS IN 1 PACK)" when packs are involved.</summary>
+    private static string DescribeEntries(List<VgmEntry> entries)
+    {
+        int songs = 0;
+        var packs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (VgmEntry entry in entries)
+        {
+            if (entry.SongId is null)
+                continue;
+
+            songs++;
+            packs.Add(entry.Source ?? entry.Path);
+        }
+
+        if (songs == 0)
+            return $"({entries.Count})";
+
+        int files = entries.Count - songs;
+        string packText = packs.Count == 1 ? "1 PACK" : $"{packs.Count} PACKS";
+        return files == 0
+            ? $"({songs} SONGS IN {packText})"
+            : $"({files} FILES + {songs} SONGS IN {packText})";
     }
 
     /// <summary>
