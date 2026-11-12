@@ -135,6 +135,12 @@ public sealed class RomExtractionOptions
 
     /// <summary>Maximum session duration (safety).</summary>
     public double TimeoutSeconds { get; set; } = 3600;
+
+    /// <summary>Record PSG writes (default true).</summary>
+    public bool CapturePsg { get; set; } = true;
+
+    /// <summary>Record SCC writes (default true).</summary>
+    public bool CaptureScc { get; set; } = true;
 }
 
 /// <summary>Extraction result: the library and the generated files.</summary>

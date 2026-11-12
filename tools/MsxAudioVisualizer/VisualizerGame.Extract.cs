@@ -47,6 +47,12 @@ public sealed partial class VisualizerGame : Game
     private int _extractSeconds = 30;
     private int _extractField = 1;            // 0 = ROM path, 1 = key script, 2 = profile path
 
+    private string _extractOutDir = string.Empty;   // empty = the folder next to the ROM
+    private bool _extractOutAuto = true;            // follow the ROM's folder until the user picks one
+    private int _extractFormat;                     // 0 = .vgm, 1 = .msxaudio (capture only)
+    private bool _extractPsg = true;
+    private bool _extractScc = true;
+
     private bool _extractRunning;
     private CancellationTokenSource? _extractCts;
     private Task<string?>? _extractTask;
@@ -59,6 +65,7 @@ public sealed partial class VisualizerGame : Game
 
     // Clickable areas (design coordinates, filled by DrawExtractDialog).
     private Rectangle _exRomHit, _exBrowseHit, _exMapperHit, _exKeysHit, _exProfileHit, _exProfileBrowseHit;
+    private Rectangle _exOutHit, _exOutBrowseHit, _exFmtVgmHit, _exFmtPkgHit, _exPsgHit, _exSccHit;
     private Rectangle _exMinusHit, _exPlusHit, _exStartHit, _exScanHit, _exCloseHit;
     private Rectangle _exModeCaptureHit, _exModeProfileHit;
     private Rectangle _extractButtonHit;      // header chip
@@ -93,12 +100,15 @@ public sealed partial class VisualizerGame : Game
 
         _extractField = _extractRom.Length == 0 ? 0 : 1;
         _extractError = null;
+
+        if (_extractOutAuto)
+            _extractOutDir = DefaultOutDir(_extractRom);
     }
 
     /// <summary>The folder browser hands a picked cartridge back here.</summary>
     private void PickRom(string path)
     {
-        _extractRom = path;
+        SetRom(path);
         _dialog = DialogKind.Extract;
         _browserPick = BrowserPick.None;
         _extractField = 1;
@@ -106,6 +116,39 @@ public sealed partial class VisualizerGame : Game
 
         _settings.LastRom = path;
         _settings.Save();
+    }
+
+    /// <summary>
+    /// Sets the ROM (also used while typing). While the output folder is "auto" it follows the ROM:
+    /// <c>&lt;rom folder&gt;/extracted_audio</c>.
+    /// </summary>
+    private void SetRom(string path)
+    {
+        _extractRom = path;
+
+        if (_extractOutAuto)
+            _extractOutDir = DefaultOutDir(path);
+    }
+
+    /// <summary><c>&lt;folder of the ROM or archive&gt;/extracted_audio/&lt;rom name&gt;</c>.</summary>
+    private static string DefaultOutDir(string rom)
+    {
+        if (string.IsNullOrWhiteSpace(rom))
+            return string.Empty;
+
+        try
+        {
+            string path = rom.Trim('"');
+            string folder = Path.GetDirectoryName(Path.GetFullPath(path)) ?? string.Empty;
+            if (folder.Length == 0)
+                return string.Empty;
+
+            return Path.Combine(folder, "extracted_audio", CleanStem(path));
+        }
+        catch (Exception)
+        {
+            return string.Empty;
+        }
     }
 
     /// <summary>The folder browser hands a picked profile back here.</summary>
@@ -118,15 +161,46 @@ public sealed partial class VisualizerGame : Game
         _extractError = null;
     }
 
-    /// <summary>Where the result goes: next to the ROM.</summary>
-    private string OutputPath(string suffix, string extension)
+    /// <summary>The folder the result goes to (the ROM's folder unless the user picked one).</summary>
+    private string OutputFolder()
+    {
+        if (_extractOutDir.Length > 0)
+            return _extractOutDir;
+
+        return _extractRom.Length > 0
+            ? Path.GetDirectoryName(Path.GetFullPath(_extractRom)) ?? string.Empty
+            : string.Empty;
+    }
+
+    /// <summary>Output file name, without the folder.</summary>
+    private string OutputFileName(string suffix, string extension)
     {
         if (_extractRom.Length == 0)
             return string.Empty;
 
-        string folder = Path.GetDirectoryName(Path.GetFullPath(_extractRom)) ?? string.Empty;
-        string name = Path.GetFileNameWithoutExtension(_extractRom);
-        return Path.Combine(folder, name + suffix + extension);
+        return CleanStem(_extractRom) + suffix + extension;
+    }
+
+    /// <summary>Where the result goes: the chosen folder (or the ROM's) plus the derived name.</summary>
+    private string OutputPath(string suffix, string extension)
+    {
+        string folder = OutputFolder();
+        string name = OutputFileName(suffix, extension);
+
+        if (folder.Length == 0 || name.Length == 0)
+            return string.Empty;
+
+        return Path.Combine(folder, name);
+    }
+
+    /// <summary>The folder browser hands a picked destination folder back here.</summary>
+    private void PickOutFolder(string path)
+    {
+        _extractOutDir = path;
+        _extractOutAuto = false;
+        _dialog = DialogKind.Extract;
+        _browserPick = BrowserPick.None;
+        _extractError = null;
     }
 
     /// <summary>Passes the current ROM (and key script) to the profile scanner.</summary>
@@ -166,6 +240,9 @@ public sealed partial class VisualizerGame : Game
         string profilePath = _extractProfile;
         int seconds = _extractSeconds;
         int mapperIndex = _extractMapper;
+        bool psg = _extractPsg;
+        bool scc = _extractScc;
+        bool package = _extractFormat == 1;
         ExtractMode mode = _extractMode;
 
         _extractError = null;
@@ -179,7 +256,7 @@ public sealed partial class VisualizerGame : Game
             ? OutputPath("_songs", ".msxaudio")
             : mode == ExtractMode.Profile
                 ? OutputPath("_" + Path.GetFileNameWithoutExtension(profilePath), ".msxaudio")
-                : OutputPath("_capture", ".vgm");
+                : OutputPath("_capture", package ? ".msxaudio" : ".vgm");
 
         string output = _extractOutput;
 
@@ -198,11 +275,11 @@ public sealed partial class VisualizerGame : Game
             try
             {
                 if (scan)
-                    return RunScanJob(rom, mapperIndex, profilePath, token, output);
+                    return RunScanJob(rom, mapperIndex, profilePath, psg, scc, token, output);
 
                 return mode == ExtractMode.Profile
-                    ? RunProfileJob(rom, profilePath, token, output)
-                    : RunCaptureJob(rom, mapperIndex, keys, seconds, token, output);
+                    ? RunProfileJob(rom, profilePath, psg, scc, token, output)
+                    : RunCaptureJob(rom, mapperIndex, keys, seconds, package, psg, scc, token, output);
             }
             catch (OperationCanceledException)
             {
@@ -217,14 +294,16 @@ public sealed partial class VisualizerGame : Game
     }
 
     /// <summary>Boot + key script: whatever the cartridge plays in that window.</summary>
-    private string? RunCaptureJob(string rom, int mapperIndex, string keys, int seconds,
-        CancellationToken token, string output)
+    private string? RunCaptureJob(string rom, int mapperIndex, string keys, int seconds, bool package,
+        bool psg, bool scc, CancellationToken token, string output)
     {
         var options = new RomCaptureOptions
         {
             RomPath = rom,
             Mapper = ExtractMappers[mapperIndex].Mapper,
             Seconds = seconds,
+            CapturePsg = psg,
+            CaptureScc = scc,
         };
 
         options.Keys.AddRange(KeyPress.ParseScript(keys));
@@ -238,7 +317,21 @@ public sealed partial class VisualizerGame : Game
             progress: (frame, _) => _extractFrame = frame,
             token: token);
 
-        File.WriteAllBytes(output, VgmWriter.Write(result.Vgm));
+        if (package)
+        {
+            using var library = new MsxAudioLibrary(Path.GetFileNameWithoutExtension(rom));
+            library.Manifest.Source = $"direct capture ({Path.GetFileName(rom)})";
+
+            string name = "capture";
+            library.AddSong(name, name, result.Vgm, loop: false, originalId: null, tags: new[] { "capture", "scanned" });
+            library.Save(output);
+        }
+        else
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+            File.WriteAllBytes(output, VgmWriter.Write(result.Vgm));
+        }
+
         AddExtractLog($"saved {output} ({result.NoteWrites} pitch writes)");
 
         if (result.NoteWrites < 20)
@@ -251,7 +344,8 @@ public sealed partial class VisualizerGame : Game
     }
 
     /// <summary>Curated profile: every id, with the profile's names and durations.</summary>
-    private string? RunProfileJob(string rom, string profilePath, CancellationToken token, string output)
+    private string? RunProfileJob(string rom, string profilePath, bool psg, bool scc,
+        CancellationToken token, string output)
     {
         RomExtractionProfile profile = RomExtractionProfiles.Load(profilePath);
         AddExtractLog($"profile {profile.Name} ({profile.Ids.Count} id(s))");
@@ -259,20 +353,27 @@ public sealed partial class VisualizerGame : Game
         _extractTotalFrames = Math.Max(1, profile.Ids.Count);
 
         var result = DirectRomExtractor.Extract(
-            new RomExtractionOptions { RomPath = rom, Profile = profile },
+            new RomExtractionOptions
+            {
+                RomPath = rom,
+                Profile = profile,
+                CapturePsg = psg,
+                CaptureScc = scc,
+            },
             AddExtractLog,
             (done, _) => _extractFrame = done);
 
         token.ThrowIfCancellationRequested();
 
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
         result.Library.Save(output);
         AddExtractLog($"saved {result.Library.Songs.Count} songs + {result.Library.Clips.Count} effects");
         return output;
     }
 
     /// <summary>No profile: probe the driver's ids and keep what makes sound.</summary>
-    private string? RunScanJob(string rom, int mapperIndex, string profilePath, CancellationToken token,
-        string output)
+    private string? RunScanJob(string rom, int mapperIndex, string profilePath, bool psg, bool scc,
+        CancellationToken token, string output)
     {
         RomExtractionProfile? profile = profilePath.Length > 0 && File.Exists(profilePath)
             ? RomExtractionProfiles.Load(profilePath)
@@ -303,6 +404,8 @@ public sealed partial class VisualizerGame : Game
             FirstId = firstId,
             LastId = lastId,
             SecondsPerId = Math.Clamp(_extractSeconds, 4, 60),
+            CapturePsg = psg,
+            CaptureScc = scc,
         };
 
         if (profile is not null)
@@ -329,6 +432,7 @@ public sealed partial class VisualizerGame : Game
         }
 
         using MsxAudioLibrary library = result.ToLibrary(Path.GetFileNameWithoutExtension(rom), profile?.Names);
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
         library.Save(output);
         AddExtractLog($"saved {result.Songs.Count} sound(s) (routine {result.Routine:X4})");
         return output;
@@ -382,6 +486,35 @@ public sealed partial class VisualizerGame : Game
             _extractError = "CANCELLED";
     }
 
+    /// <summary>Keeps the tail of <paramref name="text"/> (a path's file name stays visible).</summary>
+    private static string FitTextLeft(string text, int width)
+    {
+        if (width <= 0)
+            return string.Empty;
+
+        if (PixelFont.Measure(text) <= width)
+            return text;
+
+        while (text.Length > 1 && PixelFont.Measure("…" + text[1..]) > width)
+            text = text[1..];
+
+        return "…" + text;
+    }
+
+    /// <summary>File name of a ROM or archive without the browser's " (1)" duplicate suffix.</summary>
+    private static string CleanStem(string path)
+    {
+        string stem = Path.GetFileNameWithoutExtension(path);
+
+        // "Penguin-Adventure_MSX_JA (1)" -> "Penguin-Adventure_MSX_JA"
+        int open = stem.LastIndexOf(" (", StringComparison.Ordinal);
+        if (open > 0 && stem.EndsWith(")", StringComparison.Ordinal) &&
+            int.TryParse(stem[(open + 2)..^1], out _))
+            stem = stem[..open];
+
+        return stem;
+    }
+
     /// <summary>Text typed into the dialog (wired to <c>Window.TextInput</c> in Initialize).</summary>
     private void OnExtractTextInput(char character)
     {
@@ -391,7 +524,7 @@ public sealed partial class VisualizerGame : Game
         switch (_extractField)
         {
             case 0:
-                _extractRom += character;
+                SetRom(_extractRom + character);
                 break;
             case 2:
                 _extractProfile += character;
@@ -399,6 +532,24 @@ public sealed partial class VisualizerGame : Game
                 break;
             default:
                 _extractKeys += character;
+                break;
+        }
+    }
+
+    /// <summary>Replaces the focused field with <paramref name="text"/> (paste, or a dropped path).</summary>
+    private void SetExtractFieldText(string text)
+    {
+        switch (_extractField)
+        {
+            case 0:
+                SetRom(text);
+                break;
+            case 2:
+                _extractProfile = text;
+                _extractMode = ExtractMode.Profile;
+                break;
+            default:
+                _extractKeys = text;
                 break;
         }
     }
@@ -414,6 +565,19 @@ public sealed partial class VisualizerGame : Game
             else
                 CloseDialog();
 
+            return;
+        }
+
+        // Ctrl+V (or Shift+Insert) pastes a full path into the focused field.
+        bool ctrl = _keys.IsKeyDown(Keys.LeftControl) || _keys.IsKeyDown(Keys.RightControl);
+        bool shift = _keys.IsKeyDown(Keys.LeftShift) || _keys.IsKeyDown(Keys.RightShift);
+
+        if (!_extractRunning &&
+            ((ctrl && Pressed(Keys.V)) || (shift && Pressed(Keys.Insert))) &&
+            Clipboard.TryReadText() is { Length: > 0 } pasted)
+        {
+            pasted = pasted.Trim().Trim('"');
+            SetExtractFieldText(pasted);
             return;
         }
 
@@ -434,7 +598,7 @@ public sealed partial class VisualizerGame : Game
         if (Pressed(Keys.Back) && !_extractRunning)
         {
             if (_extractField == 0 && _extractRom.Length > 0)
-                _extractRom = _extractRom[..^1];
+                SetRom(_extractRom[..^1]);
             else if (_extractField == 1 && _extractKeys.Length > 0)
                 _extractKeys = _extractKeys[..^1];
             else if (_extractField == 2 && _extractProfile.Length > 0)
@@ -445,7 +609,7 @@ public sealed partial class VisualizerGame : Game
 
         if (Pressed(Keys.Delete) && !_extractRunning && _extractField == 0)
         {
-            _extractRom = string.Empty;
+            SetRom(string.Empty);
             return;
         }
 
@@ -494,6 +658,37 @@ public sealed partial class VisualizerGame : Game
         if (_exProfileBrowseHit.Contains(p))
         {
             OpenProfileBrowser();
+            return;
+        }
+
+        if (_exOutHit.Contains(p) || _exOutBrowseHit.Contains(p))
+        {
+            OpenFolderPicker();
+            return;
+        }
+
+        if (_exFmtVgmHit.Contains(p) && !_extractRunning && _extractMode == ExtractMode.Capture)
+        {
+            _extractFormat = 0;
+            return;
+        }
+
+        if (_exFmtPkgHit.Contains(p) && !_extractRunning && _extractMode == ExtractMode.Capture)
+        {
+            _extractFormat = 1;
+            return;
+        }
+
+        if (_exPsgHit.Contains(p) && !_extractRunning)
+        {
+            // Never leave both chips off: that would record silence.
+            _extractPsg = !_extractPsg || !_extractScc;
+            return;
+        }
+
+        if (_exSccHit.Contains(p) && !_extractRunning)
+        {
+            _extractScc = !_extractScc || !_extractPsg;
             return;
         }
 
@@ -567,7 +762,7 @@ public sealed partial class VisualizerGame : Game
 
     private void DrawExtractDialog()
     {
-        const int dx = 220, dy = 100, dw = 840, dh = 520;
+        const int dx = 220, dy = 80, dw = 840, dh = 560;
         Panel(dx, dy, dw, dh);
         Rect(dx, dy, dw, 24, PanelColor);
         Text("EXTRACT FROM ROM", dx + 12, dy + 8, Accent);
@@ -581,9 +776,23 @@ public sealed partial class VisualizerGame : Game
 
         // ROM.
         Text("ROM", labelX, dy + 44, Dim);
+
+        string romLabel = _extractRom.Length == 0
+            ? "(NO ROM CHOSEN)"
+            : _extractField == 0
+                ? _extractRom
+                : Path.GetFileName(_extractRom);
+
         _exRomHit = new Rectangle(fieldX, dy + 38, fieldW, 18);
-        DrawField(_exRomHit, _extractRom.Length > 0 ? Path.GetFileName(_extractRom) : "(NO ROM CHOSEN)",
-            _extractField == 0, _extractRom.Length > 0 ? null : Dim);
+        Rect(_exRomHit, Grid);
+        Rect(_exRomHit.X + 1, _exRomHit.Y + 1, _exRomHit.Width - 2, _exRomHit.Height - 2, PanelColor);
+        Text(_extractField == 0 ? FitTextLeft(romLabel, _exRomHit.Width - 12) : FitText(romLabel, _exRomHit.Width - 12),
+            _exRomHit.X + 6, _exRomHit.Y + 5,
+            _extractRom.Length > 0 ? (_extractField == 0 ? Accent : TextColor) : Dim);
+
+        if (_extractField == 0)
+            Rect(_exRomHit.X + 6 + Math.Min(PixelFont.Measure(FitTextLeft(romLabel, _exRomHit.Width - 12)), _exRomHit.Width - 12),
+                _exRomHit.Y + 3, 1, _exRomHit.Height - 6, Accent);
 
         _exBrowseHit = new Rectangle(fieldX + fieldW + 8, dy + 38, 84, 18);
         DrawButton(_exBrowseHit, "BROWSE", false, Accent);
@@ -653,40 +862,78 @@ public sealed partial class VisualizerGame : Game
                 fieldX, dy + 146, Dim);
         }
 
-        // Output path.
-        string output = _extractOutput is { Length: > 0 } last && _extractRunning
-            ? last
-            : _extractMode == ExtractMode.Profile
-                ? OutputPath("_" + Path.GetFileNameWithoutExtension(_extractProfile), ".msxaudio")
-                : OutputPath("_capture", ".vgm");
+        // Output: folder (clickable field + FOLDER button), format and chips.
+        Text("OUTPUT", labelX, dy + 176, Dim);
 
-        Text("OUTPUT", labelX, dy + 170, Dim);
-        Text(FitText(output.Length > 0 ? output : "(CHOOSE A ROM)", dw - 120), fieldX, dy + 170, Dim);
+        string folder = OutputFolder();
+        string folderLabel = folder.Length == 0
+            ? "(NEXT TO THE ROM)"
+            : _extractOutAuto ? folder + "   (AUTO)" : folder;
+
+        _exOutHit = new Rectangle(fieldX, dy + 170, fieldW, 18);
+        DrawField(_exOutHit, folderLabel, false, folder.Length == 0 ? Dim : TextColor);
+
+        _exOutBrowseHit = new Rectangle(fieldX + fieldW + 8, dy + 170, 84, 18);
+        DrawButton(_exOutBrowseHit, "FOLDER", false, Accent);
+
+        // Format: a capture can be saved as one VGM or as a one-song package. Profiles/scans always
+        // produce a package, so the VGM chip is only meaningful in capture mode.
+        Text("FORMAT", labelX, dy + 204, Dim);
+
+        bool canPickVgm = _extractMode == ExtractMode.Capture;
+        bool vgm = canPickVgm && _extractFormat == 0;
+
+        _exFmtVgmHit = new Rectangle(fieldX, dy + 198, 50, 18);
+        DrawButton(_exFmtVgmHit, "VGM", vgm, Accent);
+
+        _exFmtPkgHit = new Rectangle(fieldX + 54, dy + 198, 96, 18);
+        DrawButton(_exFmtPkgHit, "MSXAUDIO", !vgm, Accent);
+
+        if (!canPickVgm)
+            Text("(PACKAGE ONLY)", fieldX + 158, dy + 204, Dim);
+
+        // Chips: what gets recorded (both on = the raw driver output).
+        int chipsX = fieldX + 300;
+        Text("CHIPS", chipsX - 52, dy + 204, Dim);
+
+        _exPsgHit = new Rectangle(chipsX, dy + 198, 44, 18);
+        DrawButton(_exPsgHit, "PSG", _extractPsg, PsgColor);
+
+        _exSccHit = new Rectangle(chipsX + 48, dy + 198, 44, 18);
+        DrawButton(_exSccHit, "SCC", _extractScc, SccColor);
+
+        // The file that will be written, so the whole path is visible without editing it.
+        string fileName = _extractRunning && _extractOutput is { Length: > 0 } running
+            ? Path.GetFileName(running)
+            : FileNameForCurrentMode();
+
+        Text(FitText("FILE: " + (fileName.Length > 0 ? fileName : "(CHOOSE A ROM)"), dw - 240),
+            fieldX, dy + 222, Dim);
 
         // Start / scan / progress.
-        _exStartHit = new Rectangle(fieldX, dy + 196, 110, 20);
+        _exStartHit = new Rectangle(fieldX, dy + 244, 110, 20);
         DrawButton(_exStartHit,
             _extractRunning ? "STOP" : _extractMode == ExtractMode.Profile ? "EXTRACT ALL" : "CAPTURE",
             _extractRunning, _extractRunning ? Warn : Accent);
 
-        _exScanHit = new Rectangle(fieldX + 118, dy + 196, 152, 20);
+        _exScanHit = new Rectangle(fieldX + 118, dy + 244, 152, 20);
         DrawButton(_exScanHit, "FIND ALL SONGS", false, Accent);
 
         int barX = _exScanHit.Right + 12;
         int barW = dx + dw - 16 - barX - 46;
         float filled = Math.Clamp(_extractFrame / (float)_extractTotalFrames, 0f, 1f);
 
-        Rect(barX, dy + 202, barW, 8, Grid);
-        Rect(barX, dy + 202, (int)(barW * filled), 8, _extractRunning ? PsgColor : Accent);
+        Rect(barX, dy + 250, barW, 8, Grid);
+        Rect(barX, dy + 250, (int)(barW * filled), 8, _extractRunning ? PsgColor : Accent);
 
         string percent = $"{(int)(filled * 100)}%";
-        Text(percent, barX + barW + 10, dy + 202, _extractRunning ? TextColor : Dim);
+        Text(percent, barX + barW + 10, dy + 250, _extractRunning ? TextColor : Dim);
 
         if (_extractError is { } error)
-            Text(FitText(error, dw - 190), barX, dy + 184, Warn);
+            Text(FitText(error, dw - 190), barX, dy + 232, Warn);
 
         // Log tail.
-        int logTop = dy + 232;
+        int logTop = dy + 280;
         int logBottom = dy + dh - 30;
         Rect(dx + 16, logTop - 4, dw - 32, 1, Grid);
 
@@ -712,9 +959,16 @@ public sealed partial class VisualizerGame : Game
                 dx + 16, logTop + 24, Dim);
         }
 
-        Text("ENTER RUNS · ESC CANCELS · THE RESULT IS SAVED NEXT TO THE ROM AND OPENED HERE",
+        Text("ENTER RUNS · ESC CANCELS · THE RESULT GOES TO THE OUTPUT FOLDER AND OPENS HERE",
             dx + 16, dy + dh - 22, Dim);
     }
+
+    /// <summary>File name the current mode will produce (shown under the output row).</summary>
+    private string FileNameForCurrentMode() => _extractMode switch
+    {
+        ExtractMode.Profile => OutputFileName("_" + Path.GetFileNameWithoutExtension(_extractProfile), ".msxaudio"),
+        _ => OutputFileName("_capture", _extractFormat == 1 ? ".msxaudio" : ".vgm"),
+    };
 
     /// <summary>One-line description of the selected profile (name, ids, songs).</summary>
     private string ProfileSummary()

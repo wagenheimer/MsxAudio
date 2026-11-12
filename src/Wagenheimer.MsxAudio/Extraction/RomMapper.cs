@@ -68,7 +68,7 @@ internal sealed class Cartridge
         _banks16 = Math.Max(1, rom.Length / Bank16);
 
         if (mapper == RomMapper.Auto)
-            mapper = rom.Length <= 0x8000 ? RomMapper.Linear : RomMapper.KonamiScc;
+            mapper = DetectMapper(rom);
 
         Mapper = mapper;
         Scc = scc ?? mapper == RomMapper.KonamiScc;
@@ -83,6 +83,41 @@ internal sealed class Cartridge
 
     /// <summary>True when the address belongs to the SCC window (0x9800-0x9FFF).</summary>
     public bool IsScc(ushort address) => Scc && address >= 0x9800 && address < 0x9A00;
+
+    /// <summary>
+    /// Picks a mapper from the ROM when the caller did not choose one: a small cartridge is linear,
+    /// and a banked one is Konami — with the SCC only when the code actually touches its window.
+    /// </summary>
+    /// <remarks>
+    /// Size alone is not enough: 128 KB Konami cartridges exist with and without the SCC (King's
+    /// Valley II and Penguin Adventure are both RC-74x 128 KB titles, but only the former drives the
+    /// chip), and picking the wrong mapper leaves the game unable to bank its own code.
+    /// </remarks>
+    internal static RomMapper DetectMapper(byte[] rom)
+    {
+        if (rom.Length <= 0x8000)
+            return RomMapper.Linear;
+
+        return UsesScc(rom) ? RomMapper.KonamiScc : RomMapper.Konami;
+    }
+
+    /// <summary>Heuristic: does the ROM reference the SCC window (0x9800-0x9FFF)?</summary>
+    internal static bool UsesScc(byte[] rom)
+    {
+        for (int i = 0; i + 2 < rom.Length; i++)
+        {
+            byte op = rom[i];
+
+            // LD (nnnn),A / LD A,(nnnn) / LD HL,nnnn / LD (nnnn),HL
+            if (op is not (0x32 or 0x3A or 0x21 or 0x22))
+                continue;
+
+            if (rom[i + 2] is >= 0x98 and <= 0x9F)
+                return true;
+        }
+
+        return false;
+    }
 
     public byte Read(ushort address)
     {

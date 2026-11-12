@@ -33,9 +33,14 @@ public static class DirectRomExtractor
             throw new FileNotFoundException("ROM not found", options.RomPath);
 
         RomExtractionProfile profile = options.Profile;
-        byte[] rom = File.ReadAllBytes(options.RomPath);
+        string romPath = RomFile.Resolve(options.RomPath);
+        byte[] rom = File.ReadAllBytes(romPath);
         RomMapper mapper = RomMapperNames.Parse(profile.RomType);
-        var machine = new MiniMsx(rom, mapper);
+        var machine = new MiniMsx(rom, mapper)
+        {
+            CapturePsg = options.CapturePsg,
+            CaptureScc = options.CaptureScc,
+        };
 
         bool hooked = machine.Boot();
         var (resolvedMapper, scc) = machine.CartridgeInfo;
@@ -48,7 +53,7 @@ public static class DirectRomExtractor
                         "the driver may not advance");
 
         var library = new MsxAudioLibrary(profile.Name);
-        library.Manifest.Source = $"direct driver run ({Path.GetFileName(options.RomPath)})";
+        library.Manifest.Source = $"direct driver run ({Path.GetFileName(romPath)})";
         var files = new Dictionary<int, string>();
         int done = 0;
 

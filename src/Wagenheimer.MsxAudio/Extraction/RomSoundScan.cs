@@ -56,6 +56,12 @@ public sealed class RomScanOptions
 
     /// <summary>How many candidate routines to probe when <see cref="SoundCallAddress"/> is 0.</summary>
     public int MaxCandidates { get; init; } = 16;
+
+    /// <summary>Record PSG writes (default true).</summary>
+    public bool CapturePsg { get; init; } = true;
+
+    /// <summary>Record SCC writes (default true).</summary>
+    public bool CaptureScc { get; init; } = true;
 }
 
 /// <summary>One id that produced sound.</summary>
@@ -171,7 +177,7 @@ public static class RomSoundScan
         if (!File.Exists(options.RomPath))
             throw new FileNotFoundException("ROM not found", options.RomPath);
 
-        byte[] rom = File.ReadAllBytes(options.RomPath);
+        byte[] rom = File.ReadAllBytes(RomFile.Resolve(options.RomPath));
 
         ushort routine = (ushort)options.SoundCallAddress;
         var candidates = new List<(ushort Address, int Score)>();
@@ -201,7 +207,12 @@ public static class RomSoundScan
             log?.Invoke($"using {routine:X4} ({candidates[0].Score} pitch writes on the probe)");
         }
 
-        var machine = new MiniMsx(rom, options.Mapper);
+        var machine = new MiniMsx(rom, options.Mapper)
+        {
+            CapturePsg = options.CapturePsg,
+            CaptureScc = options.CaptureScc,
+        };
+
         machine.Boot(1_000_000);
         var (mapper, scc) = machine.CartridgeInfo;
 
@@ -372,7 +383,12 @@ public static class RomSoundScan
     /// </summary>
     private static int Probe(byte[] rom, RomScanOptions options, ushort routine, CancellationToken token)
     {
-        var machine = new MiniMsx(rom, options.Mapper);
+        var machine = new MiniMsx(rom, options.Mapper)
+        {
+            CapturePsg = options.CapturePsg,
+            CaptureScc = options.CaptureScc,
+        };
+
         machine.Boot(500_000);
 
         int score = 0;
@@ -454,6 +470,28 @@ public static class RomSoundScan
             // LD (nnnn),A into the SCC window
             if (op == 0x32 && rom[i + 2] is >= 0x98 and <= 0x9F)
                 return true;
+
+            // LD HL,&9800..&9FFF followed by LD (HL),A: the usual way to reach the SCC
+            if (op == 0x21 && rom[i + 2] is >= 0x98 and <= 0x9F)
+            {
+                int stop = Math.Min(end, i + 12);
+                for (int j = i + 3; j < stop; j++)
+                {
+                    if (rom[j] == 0x77) // LD (HL),A
+                        return true;
+                }
+            }
+
+            // LD C,&A0/&A1 followed by OUT (C),A: PSG writes without the BIOS call
+            if (op == 0x0E && rom[i + 1] is 0xA0 or 0xA1)
+            {
+                int stop = Math.Min(end, i + 12);
+                for (int j = i + 2; j < stop - 1; j++)
+                {
+                    if (rom[j] == 0xED && rom[j + 1] == 0x79) // OUT (C),A
+                        return true;
+                }
+            }
 
             // Nested call: a wrapper around the real writer
             if (op == 0xCD)

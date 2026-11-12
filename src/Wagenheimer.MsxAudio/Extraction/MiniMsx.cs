@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Konamiman.Z80dotNet;
 using Wagenheimer.MsxAudio.Vgm;
@@ -17,7 +17,7 @@ namespace Wagenheimer.MsxAudio.Extraction;
 /// Every write to the PSG/SCC is recorded with its timestamp and becomes a VGM.</para>
 ///
 /// <para>Because no VDP/BIOS is emulated, a game whose driver depends on video state will not
-/// work here — the openMSX path remains the general fallback.</para>
+/// work here â€” the openMSX path remains the general fallback.</para>
 /// </remarks>
 public sealed class MiniMsx
 {
@@ -44,6 +44,12 @@ public sealed class MiniMsx
 
     /// <summary>Records high-RAM writes (diagnostics).</summary>
     public bool TraceWrites { get; set; }
+
+    /// <summary>Records PSG register writes (default true). Off keeps the PSG out of the capture.</summary>
+    public bool CapturePsg { get; set; } = true;
+
+    /// <summary>Records SCC register writes (default true). Off keeps the SCC out of the capture.</summary>
+    public bool CaptureScc { get; set; } = true;
 
     /// <summary>High-RAM writes captured while <see cref="TraceWrites"/> is on.</summary>
     public List<(ushort Address, byte Value)> Trace { get; } = new();
@@ -153,7 +159,7 @@ public sealed class MiniMsx
 
         // The BIOS interrupt handler calls both hooks, H.KEYI first and then H.TIMI. A handler that
         // does not fit the per-frame budget keeps running into the next frame (hardware overrun),
-        // instead of being restarted — restarting it left the game's re-entry guard set forever.
+        // instead of being restarted â€” restarting it left the game's re-entry guard set forever.
         int hookBudget = Math.Max(2000, maxInstructions / 3);
         if (_hookRunning)
         {
@@ -426,10 +432,14 @@ public sealed class MiniMsx
         {
             // BIOS WRTPSG: A = register, E = value
             var main = (MainZ80Registers)registers;
-            _events.Add(new VgmEvent(_sample, VgmEventKind.Psg, main.A, main.E, 0));
 
-            if (main.A <= 5)
-                PitchWriteCount++;
+            if (CapturePsg)
+            {
+                _events.Add(new VgmEvent(_sample, VgmEventKind.Psg, main.A, main.E, 0));
+
+                if (main.A <= 5)
+                    PitchWriteCount++;
+            }
 
             ReturnFromBios(registers);
             return;
@@ -531,7 +541,7 @@ public sealed class MiniMsx
 
         if (_cartridge.IsScc(address))
         {
-            CaptureScc(a & 0xFF, value);
+            CaptureSccRegister(a & 0xFF, value);
             return;
         }
 
@@ -554,6 +564,9 @@ public sealed class MiniMsx
             return;
         }
 
+        if (!CapturePsg)
+            return;
+
         _events.Add(new VgmEvent(_sample, VgmEventKind.Psg, _psgLatch, value, 0));
 
         if (_psgLatch <= 5)
@@ -561,8 +574,11 @@ public sealed class MiniMsx
     }
 
     /// <summary>Konami SCC register write (memory mapped at 0x9800-0x98FF).</summary>
-    private void CaptureScc(int register, byte value)
+    private void CaptureSccRegister(int register, byte value)
     {
+        if (!CaptureScc)
+            return;
+
         if (register < 0x80)
             _events.Add(new VgmEvent(_sample, VgmEventKind.Scc, 0, (byte)register, value));
         else if (register < 0x8A)

@@ -64,7 +64,8 @@ public static class Library
     }
 
     /// <summary>
-    /// Scans <paramref name="root"/> for <paramref name="pattern"/> (VGM by default).
+    /// Scans <paramref name="root"/> for <paramref name="pattern"/> (VGM by default). Several patterns
+    /// can be given, separated by commas (<c>*.rom,*.zip</c>).
     /// <paramref name="progress"/> receives the file count every few hits (called from the worker
     /// thread; keep it cheap).
     /// </summary>
@@ -72,6 +73,7 @@ public static class Library
         Action<int>? progress = null, string pattern = "*.vgm")
     {
         var result = new ScanResult { Root = root, Recursive = recursive };
+        string[] patterns = pattern.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         try
         {
@@ -84,10 +86,13 @@ public static class Library
             if (!recursive)
             {
                 result.Folders = 1;
-                foreach (string file in Directory.EnumerateFiles(root, pattern))
+                foreach (string current in patterns)
                 {
-                    token.ThrowIfCancellationRequested();
-                    result.Files.Add(Entry(file));
+                    foreach (string file in Directory.EnumerateFiles(root, current))
+                    {
+                        token.ThrowIfCancellationRequested();
+                        result.Files.Add(Entry(file));
+                    }
                 }
 
                 if (pattern == "*.vgm")
@@ -126,13 +131,16 @@ public static class Library
 
                     try
                     {
-                        foreach (string file in Directory.EnumerateFiles(dir, pattern))
+                        foreach (string current in patterns)
                         {
-                            token.ThrowIfCancellationRequested();
-                            result.Files.Add(Entry(file));
+                            foreach (string file in Directory.EnumerateFiles(dir, current))
+                            {
+                                token.ThrowIfCancellationRequested();
+                                result.Files.Add(Entry(file));
 
-                            if (result.Files.Count % 32 == 0)
-                                progress?.Invoke(result.Files.Count);
+                                if (result.Files.Count % 32 == 0)
+                                    progress?.Invoke(result.Files.Count);
+                            }
                         }
 
                         if (pattern == "*.vgm")

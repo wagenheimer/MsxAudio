@@ -38,13 +38,17 @@ public sealed partial class VisualizerGame : Game
     private BrowserPick _browserPick;
 
     /// <summary>What the folder browser is choosing, if anything (it returns to the extract dialog).</summary>
-    private enum BrowserPick { None, Rom, Profile }
+    private enum BrowserPick { None, Rom, Profile, Folder }
     private readonly List<(Rectangle Rect, int Index)> _browserDirHit = new();
     private readonly List<(Rectangle Rect, int Index)> _browserFileHit = new();
     private readonly List<(Rectangle Rect, string Path)> _browserCrumbHit = new();
     private readonly List<(Rectangle Rect, string Path)> _browserRecentHit = new();
     private Rectangle _browserUpHit, _browserRecursiveHit, _browserPlayHit, _browserCancelHit, _browserCloseHit;
     private Rectangle _profileButtonHit;
+
+    // Scrollbars of the two browser panes (design coordinates, filled while drawing).
+    private Rectangle _browserFolderTrack, _browserFileTrack;
+    private int _browserScrollDrag;   // 0 = none, 1 = folders, 2 = files
 
     // ── Profile dialog ───────────────────────────────────────────────────────────
     private int _profileSel;
@@ -82,10 +86,28 @@ public sealed partial class VisualizerGame : Game
                 : Directory.GetCurrentDirectory();
 
         _dialog = DialogKind.Folder;
-        _browserPattern = "*.rom";
+        _browserPattern = "*.rom,*.zip";
         _browserPick = BrowserPick.Rom;
         _browserRecursive = false;
         _browserFocusFiles = true;
+        _browserWheel = _mouse.ScrollWheelValue;
+        LoadBrowserFolder(dir);
+    }
+
+    /// <summary>Folder browser in "pick the destination folder" mode.</summary>
+    private void OpenFolderPicker()
+    {
+        string dir = _extractOutDir.Length > 0 && Directory.Exists(_extractOutDir)
+            ? _extractOutDir
+            : _extractRom.Length > 0 && Directory.Exists(Path.GetDirectoryName(_extractRom))
+                ? Path.GetDirectoryName(_extractRom)!
+                : Directory.GetCurrentDirectory();
+
+        _dialog = DialogKind.Folder;
+        _browserPattern = "*.";
+        _browserPick = BrowserPick.Folder;
+        _browserRecursive = false;
+        _browserFocusFiles = false;
         _browserWheel = _mouse.ScrollWheelValue;
         LoadBrowserFolder(dir);
     }
@@ -250,6 +272,9 @@ public sealed partial class VisualizerGame : Game
             return;
         }
 
+        if (_browserPick == BrowserPick.Folder)
+            return;
+
         _settings.Recursive = _browserRecursive;
         _settings.LastFolder = _browserDir;
         _settings.AddRecent(_browserDir);
@@ -378,7 +403,9 @@ public sealed partial class VisualizerGame : Game
 
         if (Pressed(Keys.Enter))
         {
-            if (_browserFocusFiles)
+            if (_browserPick == BrowserPick.Folder)
+                PickOutFolder(_browserDir);
+            else if (_browserFocusFiles)
                 PlayBrowserFile();
             else if (_browserRows.Count > 0)
                 LoadBrowserFolder(_browserRows[Math.Clamp(_browserDirSel, 0, _browserRows.Count - 1)].Path);
@@ -390,6 +417,43 @@ public sealed partial class VisualizerGame : Game
         _browserWheel = _mouse.ScrollWheelValue;
         if (wheel != 0)
             ScrollBrowser(wheel > 0 ? -3 : 3);
+
+        // Scrollbars: drag (or click) the thumb of either pane.
+        Point m = MouseDesign();
+        bool held = _mouse.LeftButton == ButtonState.Pressed;
+
+        if (!held)
+            _browserScrollDrag = 0;
+
+        if (held && _browserScrollDrag != 0)
+        {
+            if (_browserScrollDrag == 1)
+                ScrollBrowserTo(1, m.Y, _browserFolderTrack, _browserFolderRows, _browserRows.Count);
+            else
+                ScrollBrowserTo(2, m.Y, _browserFileTrack, DialogRows, _browserFiles.Count);
+
+            _browserWheel = _mouse.ScrollWheelValue;
+            return;
+        }
+
+        if (held && _mouse.LeftButton == ButtonState.Pressed && _prevMouse.LeftButton == ButtonState.Released)
+        {
+            if (_browserFolderTrack.Contains(m) && _browserRows.Count > _browserFolderRows)
+            {
+                _browserScrollDrag = 1;
+                _browserFocusFiles = false;
+                ScrollBrowserTo(1, m.Y, _browserFolderTrack, _browserFolderRows, _browserRows.Count);
+                return;
+            }
+
+            if (_browserFileTrack.Contains(m) && _browserFiles.Count > DialogRows)
+            {
+                _browserScrollDrag = 2;
+                _browserFocusFiles = true;
+                ScrollBrowserTo(2, m.Y, _browserFileTrack, DialogRows, _browserFiles.Count);
+                return;
+            }
+        }
 
         bool pressed = _mouse.LeftButton == ButtonState.Pressed &&
                        _prevMouse.LeftButton == ButtonState.Released;
@@ -419,7 +483,11 @@ public sealed partial class VisualizerGame : Game
 
         if (_browserPlayHit.Contains(p))
         {
-            PlayBrowserFile();
+            if (_browserPick == BrowserPick.Folder)
+                PickOutFolder(_browserDir);
+            else
+                PlayBrowserFile();
+
             return;
         }
 
@@ -520,6 +588,53 @@ public sealed partial class VisualizerGame : Game
         first = Math.Clamp(first, 0, Math.Max(0, count - rows));
     }
 
+    /// <summary>Label of the file filter shown in the browser ("ROM / ZIP", "VGM", ...).</summary>
+    private string PatternLabel()
+    {
+        if (_browserPick == BrowserPick.Folder)
+            return "FOLDER";
+
+        var parts = new List<string>();
+        foreach (string pattern in _browserPattern.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            parts.Add(pattern.Replace("*", string.Empty).TrimStart('.').ToUpperInvariant());
+
+        return string.Join(" / ", parts);
+    }
+
+    /// <summary>
+    /// Draws a scrollbar for a list and registers it, so it can be clicked and dragged.
+    /// </summary>
+    /// <returns>The thumb rectangle (empty when the list fits).</returns>
+    private Rectangle DrawBrowserScrollbar(int x, int y, int height, int first, int rows, int count, bool active)
+    {
+        Rect(x, y, 6, height, Grid);
+
+        if (count <= rows || height <= 8)
+            return Rectangle.Empty;
+
+        int thumbHeight = Math.Max(14, height * rows / count);
+        int maxFirst = count - rows;
+        int thumbY = y + (int)((height - thumbHeight) * (first / (float)maxFirst));
+
+        Rect(x, thumbY, 6, thumbHeight, active ? Accent : Dim);
+        return new Rectangle(x - 3, thumbY, 12, thumbHeight);
+    }
+
+    /// <summary>Maps a click/drag on a browser scrollbar to the first visible row.</summary>
+    private void ScrollBrowserTo(int pane, int mouseY, Rectangle track, int rows, int count)
+    {
+        if (track.Height <= 0 || count <= rows)
+            return;
+
+        float t = Math.Clamp((mouseY - track.Y) / (float)track.Height, 0f, 1f);
+        int first = Math.Clamp((int)(t * count) - rows / 2, 0, count - rows);
+
+        if (pane == 1)
+            _browserDirFirst = first;
+        else
+            _browserFileFirst = first;
+    }
+
     private void HandleProfileDialogInput()
     {
         if (Pressed(Keys.Escape) || Pressed(Keys.Enter))
@@ -590,6 +705,7 @@ public sealed partial class VisualizerGame : Game
         {
             BrowserPick.Rom => "SELECT A CARTRIDGE (.ROM)",
             BrowserPick.Profile => "SELECT AN EXTRACTION PROFILE (.JSON)",
+            BrowserPick.Folder => "SELECT THE OUTPUT FOLDER",
             _ => "OPEN FOLDER",
         }, dx + 12, dy + 8, Accent);
 
@@ -633,7 +749,7 @@ public sealed partial class VisualizerGame : Game
         _browserDirFirst = Math.Clamp(_browserDirFirst, 0, Math.Max(0, _browserRows.Count - folderRows));
 
         Text("FOLDERS", leftX + 4, listTop - 12, _browserFocusFiles ? Dim : Accent);
-        Text($"*{_browserPattern[1..].ToUpperInvariant()} ({_browserFiles.Count})", rightX + 4, listTop - 12,
+        Text($"{PatternLabel()} ({_browserFiles.Count})", rightX + 4, listTop - 12,
             _browserFocusFiles ? Accent : Dim);
 
         Rect(leftX, listTop, 1, folderH, Grid);
@@ -651,7 +767,7 @@ public sealed partial class VisualizerGame : Game
             if (active)
                 Rect(leftX + 2, rowY - 3, leftW - 8, 17, PanelHi);
 
-            _browserDirHit.Add((new Rectangle(leftX, rowY - 4, leftW - 6, 18), index));
+            _browserDirHit.Add((new Rectangle(leftX, rowY - 4, leftW - 12, 18), index));
 
             if (row.Parent)
             {
@@ -669,6 +785,10 @@ public sealed partial class VisualizerGame : Game
 
         if (subFolders == 0)
             Text("(NO SUBFOLDERS)", leftX + 8, listTop + (_browserRows.Count > 0 ? 18 : 0), Dim);
+
+        _browserFolderTrack = new Rectangle(leftX + leftW - 12, listTop, 6, folderH);
+        DrawBrowserScrollbar(_browserFolderTrack.X, listTop, folderH, _browserDirFirst, folderRows,
+            _browserRows.Count, !_browserFocusFiles);
 
         // Recent folders (clickable).
         _browserRecentHit.Clear();
@@ -709,7 +829,7 @@ public sealed partial class VisualizerGame : Game
             if (active)
                 Rect(rightX + 2, rowY - 3, rightW - 8, 17, PanelHi);
 
-            _browserFileHit.Add((new Rectangle(rightX, rowY - 4, rightW - 4, 18), index));
+            _browserFileHit.Add((new Rectangle(rightX, rowY - 4, rightW - 12, 18), index));
 
             string name = entry.Name.ToUpperInvariant();
             int nameRoom = _browserRecursive ? 34 : 52;
@@ -737,10 +857,14 @@ public sealed partial class VisualizerGame : Game
         }
         else if (_browserFiles.Count == 0)
         {
-            string empty = $"NO {_browserPattern[1..].ToUpperInvariant()} FILES IN THIS FOLDER";
+            string empty = $"NO {PatternLabel()} FILES IN THIS FOLDER";
             Text(_browserError is null ? empty : "ERROR: " + _browserError.ToUpperInvariant(),
                 rightX + 8, listTop, _browserError is null ? Dim : Warn);
         }
+
+        _browserFileTrack = new Rectangle(rightX + rightW - 12, listTop, 6, listH);
+        DrawBrowserScrollbar(_browserFileTrack.X, listTop, listH, _browserFileFirst, DialogRows,
+            _browserFiles.Count, _browserFocusFiles);
 
         // Bottom bar.
         int barY = dy + dh - 48;
@@ -762,12 +886,19 @@ public sealed partial class VisualizerGame : Game
         DrawButton(_browserCancelHit, "CANCEL", false, Dim);
 
         _browserPlayHit = new Rectangle(dx + dw - 176, barY + 12, 76, 18);
-        DrawButton(_browserPlayHit, _browserPick == BrowserPick.None ? "PLAY" : "USE", true, Accent);
+        DrawButton(_browserPlayHit, _browserPick switch
+        {
+            BrowserPick.None => "PLAY",
+            BrowserPick.Folder => "USE FOLDER",
+            _ => "USE",
+        }, true, Accent);
 
-        Text(_browserPick == BrowserPick.None
-                ? "ENTER PLAYS · BACKSPACE UP · F5 RESCAN"
-                : $"ENTER USES THIS FILE · BACKSPACE UP · F5 RESCAN",
-            dx + 12, barY + 34, Dim);
+        Text(_browserPick switch
+        {
+            BrowserPick.None => "ENTER PLAYS · BACKSPACE UP · F5 RESCAN",
+            BrowserPick.Folder => "ENTER USES THIS FOLDER · BACKSPACE UP · F5 RESCAN",
+            _ => "ENTER USES THIS FILE · BACKSPACE UP · F5 RESCAN",
+        }, dx + 12, barY + 34, Dim);
     }
 
     /// <summary>

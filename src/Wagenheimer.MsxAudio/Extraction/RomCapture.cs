@@ -119,6 +119,12 @@ public sealed class RomCaptureOptions
 
     /// <summary>Instruction budget per frame (the hook itself may span frames).</summary>
     public int FrameBudget { get; init; } = 200_000;
+
+    /// <summary>Record PSG writes (default true).</summary>
+    public bool CapturePsg { get; init; } = true;
+
+    /// <summary>Record SCC writes (default true).</summary>
+    public bool CaptureScc { get; init; } = true;
 }
 
 /// <summary>What a capture produced.</summary>
@@ -175,10 +181,15 @@ public static class RomCapture
         if (!File.Exists(options.RomPath))
             throw new FileNotFoundException("ROM not found", options.RomPath);
 
-        byte[] rom = File.ReadAllBytes(options.RomPath);
-        var machine = new MiniMsx(rom, options.Mapper);
+        string romPath = RomFile.Resolve(options.RomPath);
+        byte[] rom = File.ReadAllBytes(romPath);
+        var machine = new MiniMsx(rom, options.Mapper)
+        {
+            CapturePsg = options.CapturePsg,
+            CaptureScc = options.CaptureScc,
+        };
 
-        log?.Invoke($"booting {Path.GetFileName(options.RomPath)} ({rom.Length / 1024} KB)...");
+        log?.Invoke($"booting {Path.GetFileName(romPath)} ({rom.Length / 1024} KB)...");
         bool hooked = machine.Boot();
         var (mapper, scc) = machine.CartridgeInfo;
 
@@ -227,7 +238,7 @@ public static class RomCapture
 
         progress?.Invoke(frames, frames);
 
-        var vgm = machine.BuildVgm(Path.GetFileNameWithoutExtension(options.RomPath), frames * 735);
+        var vgm = machine.BuildVgm(Path.GetFileNameWithoutExtension(romPath), frames * 735);
         (double Start, double Duration)? loop = null;
         if (vgm.HasLoop)
         {
