@@ -123,6 +123,12 @@ public sealed class MiniMsx
     /// <summary>High-RAM writes captured while <see cref="TraceWrites"/> is on.</summary>
     public List<(ushort Address, byte Value)> Trace { get; } = new();
 
+    /// <summary>
+    /// Chamado a cada escrita na RAM (endereço, valor, PC) — diagnóstico para descobrir **qual rotina**
+    /// monta uma estrutura (ex.: a shadow SAT em 0xE800).
+    /// </summary>
+    public Action<int, byte, ushort>? RamWriteHook { get; set; }
+
     /// <summary>Things worth telling the user about the boot (missing header, INIT that never returns...).</summary>
     public List<string> Warnings { get; } = new();
 
@@ -1023,6 +1029,7 @@ public sealed class MiniMsx
         if (slot == 3)
         {
             if (TraceWrites && a >= 0xF000) Trace.Add(((ushort)a, value));
+            RamWriteHook?.Invoke(a, value, _cpu.Registers.PC);
             _ram[a] = value;
             return;
         }
