@@ -81,6 +81,24 @@ public sealed class MiniMsx
     /// <summary>Records high-RAM writes (diagnostics).</summary>
     public bool TraceWrites { get; set; }
 
+    /// <summary>VDP video RAM (16 KB) — written by the game through ports 0x98/0x99.</summary>
+    public byte[] Vram { get; } = new byte[0x4000];
+
+    /// <summary>VDP palette (16 entries, GRB444 as the hardware stores them).</summary>
+    public ushort[] Palette { get; } = new ushort[16];
+
+    /// <summary>VDP registers 0..23 (only what the software wrote; no rendering happens).</summary>
+    public byte[] VdpRegisters { get; } = new byte[24];
+
+    /// <summary>Current VDP address latch (VRAM pointer used by the data port).</summary>
+    public int VdpAddress { get; private set; }
+
+    private int _vdpAddressLatch;
+    private int _vdpLatchCount;
+    private byte _paletteLatch;
+    private bool _paletteHigh;
+    private ushort _paletteValue;
+
     /// <summary>Records PSG register writes (default true). Off keeps the PSG out of the capture.</summary>
     public bool CapturePsg { get; set; } = true;
 
@@ -747,6 +765,53 @@ public sealed class MiniMsx
                 return true;
             }
 
+            // ── VDP services (what makes the cartridge able to draw at all) ──────
+            case 0x0047: // WRTVDP: B = value, C = register
+                if ((main.C & 0x3F) < VdpRegisters.Length)
+                    VdpRegisters[main.C & 0x3F] = main.B;
+                ReturnFromBios(registers);
+                return true;
+
+            case 0x0053: // SETWRT: HL = VRAM address for writing
+                SetVdpWriteAddress(main.HL);
+                ReturnFromBios(registers);
+                return true;
+
+            case 0x0056: // FILVRM: HL = VRAM address, BC = count, A = value
+                VdpFill(main.HL, main.BC, main.A);
+                ReturnFromBios(registers);
+                return true;
+
+            case 0x0059: // LDIRMV: DE = VRAM address, HL = RAM, BC = count
+                for (int i = 0; i < main.BC; i++)
+                    Write((ushort)unchecked((short)(main.HL + i)), Vram[(main.DE + i) & 0x3FFF]);
+                ReturnFromBios(registers);
+                return true;
+
+            case 0x005C: // LDIRVM: DE = VRAM address, HL = RAM, BC = count
+            {
+                SetVdpWriteAddress(main.DE);
+                for (int i = 0; i < main.BC; i++)
+                    WriteVdpData(Memory((ushort)unchecked((short)(main.HL + i))));
+                ReturnFromBios(registers);
+                return true;
+            }
+
+            case 0x005F: // CHGMOD: A = screen mode (the register values the game sets afterwards matter)
+                _vdpMode = main.A;
+                ReturnFromBios(registers);
+                return true;
+
+            case 0x0084: // CALPAT: A = pattern code -> HL = VRAM address of the pattern
+                main.HL = unchecked((short)(_vdpPatternBase + main.A * 8));
+                ReturnFromBios(registers);
+                return true;
+
+            case 0x0087: // CALATR: A = code -> HL = VRAM address of its colour/attribute
+                main.HL = unchecked((short)(_vdpAttributeBase + main.A * 8));
+                ReturnFromBios(registers);
+                return true;
+
             default:
                 if (pc >= 0x0004)
                     _biosHits[pc] = _biosHits.TryGetValue(pc, out int n) ? n + 1 : 1;
@@ -961,6 +1026,91 @@ public sealed class MiniMsx
         return value;
     }
 
+    // ── VDP VRAM (write-only model) ──────────────────────────────────────────────
+
+    private int _vdpMode = 1;
+    private int _vdpPatternBase;
+    private int _vdpAttributeBase = 0x2000;
+
+    /// <summary>Points the VDP address latch at <paramref name="address"/> for writing.</summary>
+    private void SetVdpWriteAddress(int address)
+    {
+        VdpAddress = address & 0x3FFF;
+        _vdpLatchCount = 0;
+    }
+
+    /// <summary>FILLVRM: writes <paramref name="value"/> into VRAM, <paramref name="count"/> times.</summary>
+    private void VdpFill(int address, int count, byte value)
+    {
+        for (int i = 0; i < count; i++)
+            Vram[(address + i) & 0x3FFF] = value;
+    }
+
+    /// <summary>Reads the VDP data port (0x98) at the current address and advances it.</summary>
+    private byte ReadVdpData()
+    {
+        byte value = Vram[VdpAddress & 0x3FFF];
+        VdpAddress = (VdpAddress + 1) & 0x3FFF;
+        return value;
+    }
+
+    /// <summary>Writes the VDP data port (0x98) and advances the address.</summary>
+    private void WriteVdpData(byte value)
+    {
+        Vram[VdpAddress & 0x3FFF] = value;
+        VdpAddress = (VdpAddress + 1) & 0x3FFF;
+    }
+
+    /// <summary>
+    /// Writes the VDP control port (0x99): two bytes set the VRAM address (bit 6 = write), or one byte
+    /// with bit 7 sets a register — the same protocol as the real chip.
+    /// </summary>
+    private void WriteVdpControl(byte value)
+    {
+        if (_vdpLatchCount == 0)
+        {
+            _vdpAddressLatch = value;
+            _vdpLatchCount = 1;
+
+            // A register write is decided by the second byte (bit 7), not by the first.
+            return;
+        }
+
+        _vdpLatchCount = 0;
+
+        if ((value & 0x80) != 0)
+        {
+            int register = _vdpAddressLatch & 0x3F;
+            if (register < VdpRegisters.Length)
+                VdpRegisters[register] = value;
+            return;
+        }
+
+        VdpAddress = ((value & 0x3F) << 8) | _vdpAddressLatch;
+    }
+
+    /// <summary>Palette index (port 0x9A).</summary>
+    private void WritePaletteIndex(byte value)
+    {
+        _paletteLatch = (byte)(value & 0x0F);
+        _paletteHigh = false;
+    }
+
+    /// <summary>Palette data (port 0x9B): two writes per colour (low, then high nibble in bit 0).</summary>
+    private void WritePaletteData(byte value)
+    {
+        if (!_paletteHigh)
+        {
+            _paletteValue = (ushort)((_paletteValue & 0x0F00) | value);
+            _paletteHigh = true;
+            return;
+        }
+
+        _paletteValue = (ushort)(((value & 0x0F) << 8) | (_paletteValue & 0xFF));
+        Palette[_paletteLatch] = _paletteValue;
+        _paletteHigh = false;
+    }
+
     /// <summary>
     /// A human-readable list of what stopped the game from getting further, or from sounding right:
     /// unsupported sound chips, BIOS services that are stubs here, a missing header.
@@ -1033,6 +1183,7 @@ public sealed class MiniMsx
         {
             get => (byte)((port & 0xFF) switch
             {
+                0x98 => _machine.ReadVdpData(),
                 0x99 => _machine.ReadVdpStatus(),
                 0xA2 => _machine.ReadPsgRegister(_machine._psgLatch),
                 0xA8 => _machine._slotRegister,
@@ -1044,6 +1195,18 @@ public sealed class MiniMsx
             {
                 switch (port & 0xFF)
                 {
+                    case 0x98:
+                        _machine.WriteVdpData(value);
+                        break;
+                    case 0x99:
+                        _machine.WriteVdpControl(value);
+                        break;
+                    case 0x9A:
+                        _machine.WritePaletteIndex(value);
+                        break;
+                    case 0x9B:
+                        _machine.WritePaletteData(value);
+                        break;
                     case 0xA0:
                         _machine._psgLatch = value;
                         break;
