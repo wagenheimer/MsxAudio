@@ -766,6 +766,22 @@ public sealed class MiniMsx
             }
 
             // ── VDP services (what makes the cartridge able to draw at all) ──────
+            case 0x004A: // RDVRM: A = VRAM[HL]
+                main.A = Vram[main.HL & 0x3FFF];
+                ReturnFromBios(registers);
+                return true;
+
+            case 0x004D: // WRTVRM: VRAM[HL] = A
+                Vram[main.HL & 0x3FFF] = main.A;
+                ReturnFromBios(registers);
+                return true;
+
+            case 0x0050: // SETRD: HL = VRAM address for reading
+                VdpAddress = main.HL & 0x3FFF;
+                _vdpLatchCount = 0;
+                ReturnFromBios(registers);
+                return true;
+
             case 0x0047: // WRTVDP: B = value, C = register
                 if ((main.C & 0x3F) < VdpRegisters.Length)
                     VdpRegisters[main.C & 0x3F] = main.B;
@@ -801,6 +817,72 @@ public sealed class MiniMsx
                 _vdpMode = main.A;
                 ReturnFromBios(registers);
                 return true;
+
+            case 0x006C: // INITXT: SCREEN 0 (40 columns) — set the tables the way the BIOS does
+            case 0x006F: // INIT32: SCREEN 1 (32 columns)
+            {
+                int columns = pc == 0x006C ? 40 : 32;
+                _textColumns = columns;
+                VdpRegisters[0] = 0x00;
+                VdpRegisters[1] = pc == 0x006C ? (byte)0x00 : (byte)0x40;
+                VdpRegisters[2] = 0x0E; // name table at 0x3800 for 40 columns, 0x1800 for 32
+                if (columns == 40) VdpRegisters[2] = 0x00;
+                VdpRegisters[3] = 0xF0;
+                VdpRegisters[4] = 0x07;
+                VdpRegisters[5] = 0x76;
+                VdpRegisters[6] = 0x03;
+                VdpRegisters[7] = 0xF0;
+                _textColumn = 0;
+                _textRow = 0;
+                ReturnFromBios(registers);
+                return true;
+            }
+
+            case 0x0072: // INIGRP: SCREEN 2 (graphic 2 tables)
+                _vdpMode = 2;
+                VdpRegisters[0] = 0x02;
+                VdpRegisters[1] = 0xE0;
+                VdpRegisters[2] = 0x0E;
+                VdpRegisters[3] = 0x80;
+                VdpRegisters[4] = 0x00;
+                VdpRegisters[5] = 0x76;
+                VdpRegisters[6] = 0x03;
+                VdpRegisters[7] = 0x00;
+                ReturnFromBios(registers);
+                return true;
+
+            case 0x00A2: // CHPUT: A = character -> name table at the cursor (BIOS keeps it in F3DC/F3DD)
+            {
+                byte character = main.A;
+                if (character == 0x0D) // CR
+                {
+                    _textColumn = 0;
+                    _textRow++;
+                }
+                else if (character == 0x0A) // LF
+                {
+                    _textRow++;
+                }
+                else if (character >= 0x20)
+                {
+                    int mask = (VdpRegisters[1] & 0x10) != 0 ? 0x0F : 0x03;
+                    int nameBase = (VdpRegisters[2] & mask) << 10;
+                    Vram[(nameBase + _textRow * _textColumns + _textColumn) & 0x3FFF] = character;
+                    _textColumn++;
+
+                    if (_textColumn >= _textColumns)
+                    {
+                        _textColumn = 0;
+                        _textRow++;
+                    }
+                }
+
+                _textRow %= 24;
+                _ram[0xF3DC] = (byte)_textColumn;
+                _ram[0xF3DD] = (byte)_textRow;
+                ReturnFromBios(registers);
+                return true;
+            }
 
             case 0x0084: // CALPAT: A = pattern code -> HL = VRAM address of the pattern
                 main.HL = unchecked((short)(_vdpPatternBase + main.A * 8));
@@ -1031,6 +1113,9 @@ public sealed class MiniMsx
     private int _vdpMode = 1;
     private int _vdpPatternBase;
     private int _vdpAttributeBase = 0x2000;
+    private int _textColumn;
+    private int _textRow;
+    private int _textColumns = 40;
 
     /// <summary>Points the VDP address latch at <paramref name="address"/> for writing.</summary>
     private void SetVdpWriteAddress(int address)
