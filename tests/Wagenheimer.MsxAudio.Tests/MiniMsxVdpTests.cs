@@ -41,8 +41,8 @@ public class MiniMsxVdpTests
     {
         var machine = new MiniMsx(BuildRom(), RomMapper.Linear);
 
-        machine.WritePort(0x99, 0x07); // register 7
-        machine.WritePort(0x99, 0x8E); // bit 7 = register write
+        machine.WritePort(0x99, 0x8E); // data for the register
+        machine.WritePort(0x99, 0x87); // 0x80 | register 7
 
         Assert.Equal(0x8E, machine.VdpRegisters[7]);
     }

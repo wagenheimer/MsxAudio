@@ -1080,9 +1080,10 @@ public sealed class MiniMsx
 
         if ((value & 0x80) != 0)
         {
-            int register = _vdpAddressLatch & 0x3F;
+            // Register write: the first byte carried the DATA, this one carries 0x80 | register.
+            int register = value & 0x3F;
             if (register < VdpRegisters.Length)
-                VdpRegisters[register] = value;
+                VdpRegisters[register] = (byte)_vdpAddressLatch;
             return;
         }
 
