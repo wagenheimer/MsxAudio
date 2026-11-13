@@ -81,8 +81,11 @@ public sealed class MiniMsx
     /// <summary>Records high-RAM writes (diagnostics).</summary>
     public bool TraceWrites { get; set; }
 
-    /// <summary>VDP video RAM (16 KB) — written by the game through ports 0x98/0x99.</summary>
-    public byte[] Vram { get; } = new byte[0x4000];
+    /// <summary>VRAM size mask (128 KB on the V9938; a TMS9918 game never goes past 16 KB).</summary>
+    public const int VramMask = 0x1FFFF;
+
+    /// <summary>VDP video RAM (128 KB) — written by the game through ports 0x98/0x99.</summary>
+    public byte[] Vram { get; } = new byte[0x20000]; // V9938: 128 KB
 
     /// <summary>VDP palette (16 entries, GRB444 as the hardware stores them).</summary>
     public ushort[] Palette { get; } = new ushort[16];
@@ -793,17 +796,17 @@ public sealed class MiniMsx
 
             // ── VDP services (what makes the cartridge able to draw at all) ──────
             case 0x004A: // RDVRM: A = VRAM[HL]
-                main.A = Vram[main.HL & 0x3FFF];
+                main.A = Vram[main.HL & VramMask];
                 ReturnFromBios(registers);
                 return true;
 
             case 0x004D: // WRTVRM: VRAM[HL] = A
-                Vram[main.HL & 0x3FFF] = main.A;
+                Vram[main.HL & VramMask] = main.A;
                 ReturnFromBios(registers);
                 return true;
 
             case 0x0050: // SETRD: HL = VRAM address for reading
-                VdpAddress = main.HL & 0x3FFF;
+                VdpAddress = main.HL & VramMask;
                 _vdpLatchCount = 0;
                 ReturnFromBios(registers);
                 return true;
@@ -829,7 +832,7 @@ public sealed class MiniMsx
 
             case 0x0059: // LDIRMV: DE = VRAM address, HL = RAM, BC = count
                 for (int i = 0; i < main.BC; i++)
-                    Write((ushort)unchecked((short)(main.HL + i)), Vram[(main.DE + i) & 0x3FFF]);
+                    Write((ushort)unchecked((short)(main.HL + i)), Vram[(main.DE + i) & VramMask]);
                 ReturnFromBios(registers);
                 return true;
 
@@ -896,7 +899,7 @@ public sealed class MiniMsx
                 {
                     int mask = (VdpRegisters[1] & 0x10) != 0 ? 0x0F : 0x03;
                     int nameBase = (VdpRegisters[2] & mask) << 10;
-                    Vram[(nameBase + _textRow * _textColumns + _textColumn) & 0x3FFF] = character;
+                    Vram[(nameBase + _textRow * _textColumns + _textColumn) & VramMask] = character;
                     _textColumn++;
 
                     if (_textColumn >= _textColumns)
@@ -1169,7 +1172,7 @@ public sealed class MiniMsx
             return;
 
         ushort caller = ReadWord((ushort)registers.SP);
-        _vramSpans.Add(new VramSpan(_sample / 735, address & 0x3FFF, count, caller));
+        _vramSpans.Add(new VramSpan(_sample / 735, address & VramMask, count, caller));
     }
 
     /// <summary>Points the VDP address latch at <paramref name="address"/> for writing.</summary>
@@ -1183,22 +1186,22 @@ public sealed class MiniMsx
     private void VdpFill(int address, int count, byte value)
     {
         for (int i = 0; i < count; i++)
-            Vram[(address + i) & 0x3FFF] = value;
+            Vram[(address + i) & VramMask] = value;
     }
 
     /// <summary>Reads the VDP data port (0x98) at the current address and advances it.</summary>
     private byte ReadVdpData()
     {
-        byte value = Vram[VdpAddress & 0x3FFF];
-        VdpAddress = (VdpAddress + 1) & 0x3FFF;
+        byte value = Vram[VdpAddress & VramMask];
+        VdpAddress = (VdpAddress + 1) & VramMask;
         return value;
     }
 
     /// <summary>Writes the VDP data port (0x98) and advances the address.</summary>
     private void WriteVdpData(byte value)
     {
-        Vram[VdpAddress & 0x3FFF] = value;
-        VdpAddress = (VdpAddress + 1) & 0x3FFF;
+        Vram[VdpAddress & VramMask] = value;
+        VdpAddress = (VdpAddress + 1) & VramMask;
     }
 
     /// <summary>
