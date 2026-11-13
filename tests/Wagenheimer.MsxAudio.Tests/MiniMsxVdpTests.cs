@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Wagenheimer.MsxAudio.Extraction;
 using Xunit;
 
@@ -93,5 +93,49 @@ public class MiniMsxVdpTests
         machine.WritePort(0x9B, 0x0A); // high nibble
 
         Assert.Equal(0x0A45, machine.Palette[2]);
+    }
+
+    [Fact]
+    public void Bios_CarriesTheVdpDataPortInTheHeader()
+    {
+        // Konami's decompressor does `LD A,(0x0007); LD C,A; OUT (C),A`, so the BIOS header must carry
+        // the data port; a BIOS of RETs sent every byte to port 0 and nothing reached the VRAM.
+        var rom = BuildRom();
+        rom[0x10] = 0x3A; rom[0x11] = 0x07; rom[0x12] = 0x00; // LD A,(0x0007)
+        rom[0x13] = 0x32; rom[0x14] = 0x00; rom[0x15] = 0xE0; // LD (0xE000),A
+        rom[0x16] = 0xC9;                                     // RET
+
+        var machine = new MiniMsx(rom, RomMapper.Linear);
+        machine.CallRoutine(0x4010);
+
+        Assert.Equal(0x98, machine.Memory(0xE000));
+    }
+
+    [Fact]
+    public void SetBiosByte_OverridesWhatTheCartridgeReads()
+    {
+        var rom = BuildRom();
+        rom[0x10] = 0x3A; rom[0x11] = 0x2B; rom[0x12] = 0x00; // LD A,(0x002B)
+        rom[0x13] = 0x32; rom[0x14] = 0x00; rom[0x15] = 0xE0; // LD (0xE000),A
+        rom[0x16] = 0xC9;                                     // RET
+
+        var machine = new MiniMsx(rom, RomMapper.Linear);
+        machine.SetBiosByte(0x002B, 0x5A);
+        machine.CallRoutine(0x4010);
+
+        Assert.Equal(0x5A, machine.Memory(0xE000));
+    }
+
+    [Fact]
+    public void VdpRegisterWrite_IsMirroredInTheBiosWorkArea()
+    {
+        // The BIOS keeps RG0SAV..RG7SAV at 0xF3DF and games read them back (e.g. RG1SAV | 0x22).
+        var machine = new MiniMsx(BuildRom(), RomMapper.Linear);
+
+        machine.WritePort(0x99, 0x62);
+        machine.WritePort(0x99, 0x81); // register 1
+
+        Assert.Equal(0x62, machine.VdpRegisters[1]);
+        Assert.Equal(0x62, machine.Memory(0xF3E0));
     }
 }

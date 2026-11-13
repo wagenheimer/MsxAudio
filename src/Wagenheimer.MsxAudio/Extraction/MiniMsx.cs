@@ -93,6 +93,18 @@ public sealed class MiniMsx
     /// <summary>Current VDP address latch (VRAM pointer used by the data port).</summary>
     public int VdpAddress { get; private set; }
 
+    /// <summary>VDP register writes in order (diagnostics: which layout the game picks, and when).</summary>
+    public IReadOnlyList<VdpWrite> VdpWrites => _vdpWrites;
+
+    /// <summary>
+    /// Blocks written into VRAM, with the routine that wrote them (diagnostics: which code draws what).
+    /// </summary>
+    public IReadOnlyList<VramSpan> VramSpans => _vramSpans;
+
+    private readonly List<VramSpan> _vramSpans = new(16384);
+
+    private readonly List<VdpWrite> _vdpWrites = new(512);
+
     private int _vdpAddressLatch;
     private int _vdpLatchCount;
     private byte _paletteLatch;
@@ -144,6 +156,12 @@ public sealed class MiniMsx
         _cartridge = new Cartridge(rom, mapper, scc);
 
         Array.Fill(_bios, (byte)0xC9); // every BIOS entry is a RET
+
+        // The BIOS header carries the VDP ports as data bytes at 0x0006/0x0007, and cartridges rely on
+        // it: Konami's decompressor does `LD A,(0x0007); LD C,A; OUT (C),A` to write the tile data. With
+        // a BIOS of RETs those bytes are 0xC9 and every byte went to port 0 (nothing ever drew).
+        _bios[0x0006] = 0x98; // VDP data port
+        _bios[0x0007] = 0x98; // VDP data port (the one the cartridge reads)
 
         // Slots: 0 = BIOS (page 0), 1 = the cartridge, 3 = 64 KB of RAM. The BIOS leaves RAM in page 2
         // for a 16 KB cartridge and the cartridge itself otherwise; page 3 is always RAM.
@@ -531,6 +549,14 @@ public sealed class MiniMsx
     /// </summary>
     public void BlockGameCalls(ushort routine) => _blockedRoutine = routine;
 
+    /// <summary>
+    /// Writes a byte into the emulated BIOS ROM (0x0000-0x3FFF). Some cartridges read constants out of
+    /// the BIOS instead of the hardware: a Konami title picks its Japanese or English screen from the low
+    /// nibble of the byte at 0x002B (which is a jump-target byte in a real BIOS), so the value that
+    /// machine had changes what the game draws.
+    /// </summary>
+    public void SetBiosByte(ushort address, byte value) => _bios[address & 0x3FFF] = value;
+
     /// <summary>Presses or releases a key in the matrix (row 0..8, mask bit 0..7; row 0x0F = joystick).</summary>
     public void PressKey(int row, int mask, bool pressed)
     {
@@ -783,18 +809,21 @@ public sealed class MiniMsx
                 return true;
 
             case 0x0047: // WRTVDP: B = value, C = register
+                SetVdpRegister(main.C & 0x3F, main.B);
                 if ((main.C & 0x3F) < VdpRegisters.Length)
-                    VdpRegisters[main.C & 0x3F] = main.B;
+                    _vdpWrites.Add(new VdpWrite(_sample / 735, main.C & 0x3F, main.B));
                 ReturnFromBios(registers);
                 return true;
 
             case 0x0053: // SETWRT: HL = VRAM address for writing
                 SetVdpWriteAddress(main.HL);
+                TraceSpan(main.HL, 0, registers);
                 ReturnFromBios(registers);
                 return true;
 
             case 0x0056: // FILVRM: HL = VRAM address, BC = count, A = value
                 VdpFill(main.HL, main.BC, main.A);
+                TraceSpan(main.HL, main.BC, registers);
                 ReturnFromBios(registers);
                 return true;
 
@@ -807,6 +836,7 @@ public sealed class MiniMsx
             case 0x005C: // LDIRVM: DE = VRAM address, HL = RAM, BC = count
             {
                 SetVdpWriteAddress(main.DE);
+                TraceSpan(main.DE, main.BC, registers);
                 for (int i = 0; i < main.BC; i++)
                     WriteVdpData(Memory((ushort)unchecked((short)(main.HL + i))));
                 ReturnFromBios(registers);
@@ -823,15 +853,14 @@ public sealed class MiniMsx
             {
                 int columns = pc == 0x006C ? 40 : 32;
                 _textColumns = columns;
-                VdpRegisters[0] = 0x00;
-                VdpRegisters[1] = pc == 0x006C ? (byte)0x00 : (byte)0x40;
-                VdpRegisters[2] = 0x0E; // name table at 0x3800 for 40 columns, 0x1800 for 32
-                if (columns == 40) VdpRegisters[2] = 0x00;
-                VdpRegisters[3] = 0xF0;
-                VdpRegisters[4] = 0x07;
-                VdpRegisters[5] = 0x76;
-                VdpRegisters[6] = 0x03;
-                VdpRegisters[7] = 0xF0;
+                SetVdpRegister(0, 0x00);
+                SetVdpRegister(1, pc == 0x006C ? (byte)0x00 : (byte)0x40);
+                SetVdpRegister(2, columns == 40 ? (byte)0x00 : (byte)0x0E);
+                SetVdpRegister(3, 0xF0);
+                SetVdpRegister(4, 0x07);
+                SetVdpRegister(5, 0x76);
+                SetVdpRegister(6, 0x03);
+                SetVdpRegister(7, 0xF0);
                 _textColumn = 0;
                 _textRow = 0;
                 ReturnFromBios(registers);
@@ -840,14 +869,14 @@ public sealed class MiniMsx
 
             case 0x0072: // INIGRP: SCREEN 2 (graphic 2 tables)
                 _vdpMode = 2;
-                VdpRegisters[0] = 0x02;
-                VdpRegisters[1] = 0xE0;
-                VdpRegisters[2] = 0x0E;
-                VdpRegisters[3] = 0x80;
-                VdpRegisters[4] = 0x00;
-                VdpRegisters[5] = 0x76;
-                VdpRegisters[6] = 0x03;
-                VdpRegisters[7] = 0x00;
+                SetVdpRegister(0, 0x02);
+                SetVdpRegister(1, 0xE0);
+                SetVdpRegister(2, 0x0E);
+                SetVdpRegister(3, 0x80);
+                SetVdpRegister(4, 0x00);
+                SetVdpRegister(5, 0x76);
+                SetVdpRegister(6, 0x03);
+                SetVdpRegister(7, 0x00);
                 ReturnFromBios(registers);
                 return true;
 
@@ -1117,6 +1146,32 @@ public sealed class MiniMsx
     private int _textRow;
     private int _textColumns = 40;
 
+    /// <summary>
+    /// Writes a VDP register and keeps the BIOS copy in RAM (RG0SAV..RG7SAV at 0xF3DF) up to date.
+    /// Games read those bytes back to build the next value (e.g. <c>RG1SAV | 0x22</c>), so writing the
+    /// register alone leaves the screen in a half-configured state.
+    /// </summary>
+    private void SetVdpRegister(int register, byte value)
+    {
+        if (register < 0 || register >= VdpRegisters.Length)
+            return;
+
+        VdpRegisters[register] = value;
+
+        if (register < 8)
+            _ram[0xF3DF + register] = value;
+    }
+
+    /// <summary>Records a VRAM block write together with the routine that asked for it.</summary>
+    private void TraceSpan(int address, int count, Z80Registers registers)
+    {
+        if (_vramSpans.Count >= 65536)
+            return;
+
+        ushort caller = ReadWord((ushort)registers.SP);
+        _vramSpans.Add(new VramSpan(_sample / 735, address & 0x3FFF, count, caller));
+    }
+
     /// <summary>Points the VDP address latch at <paramref name="address"/> for writing.</summary>
     private void SetVdpWriteAddress(int address)
     {
@@ -1168,7 +1223,11 @@ public sealed class MiniMsx
             // Register write: the first byte carried the DATA, this one carries 0x80 | register.
             int register = value & 0x3F;
             if (register < VdpRegisters.Length)
-                VdpRegisters[register] = (byte)_vdpAddressLatch;
+            {
+                SetVdpRegister(register, (byte)_vdpAddressLatch);
+                _vdpWrites.Add(new VdpWrite(_sample / 735, register, (byte)_vdpAddressLatch));
+            }
+
             return;
         }
 
@@ -1334,3 +1393,11 @@ public sealed class MiniMsx
         public byte[] GetContents(int startAddress, int length) => new byte[length];
     }
 }
+
+/// <summary>One VDP register write, with the frame it happened on.</summary>
+public readonly record struct VdpWrite(int Frame, int Register, byte Value);
+
+
+/// <summary>One block written into VRAM, with the caller address (diagnostics).</summary>
+public readonly record struct VramSpan(int Frame, int Address, int Count, ushort Caller);
+
