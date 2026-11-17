@@ -1,4 +1,4 @@
-﻿#nullable enable
+#nullable enable
 using System;
 using System.IO;
 using System.IO.Compression;
@@ -21,7 +21,7 @@ public sealed record MsxScopeRelease(string Tag, string AssetName, string Url, l
 
 /// <summary>
 /// Instala o **MSXScope** (o player/visualizer do pacote) sob demanda, a partir das releases do
-/// prÃ³prio repositÃ³rio â€” nada Ã© distribuÃ­do junto: o usuÃ¡rio sÃ³ baixa quando pede para ouvir.
+/// próprio repositório — nada é distribuído junto: o usuário só baixa quando pede para ouvir.
 ///
 /// <para>Mesmo desenho do <see cref="OpenMsxInstaller"/>: baixa para <c>.part</c>, confere tamanho e
 /// SHA-256 publicado e descompacta em <c>%APPDATA%\MSXScope\&lt;tag&gt;</c>.</para>
@@ -32,15 +32,15 @@ public static class MsxScopeInstaller
 
     private static readonly HttpClient Http = CreateClient();
 
-    /// <summary>Pasta onde as versÃµes ficam instaladas (uma subpasta por tag).</summary>
+    /// <summary>Pasta onde as versões ficam instaladas (uma subpasta por tag).</summary>
     public static string InstallRoot { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MSXScope");
 
 
     private static HttpClient CreateClient()
     {
-        // Sem timeout no cliente: a release tem ~37 MB e uma linha lenta nÃ£o pode abortar; quem
-        // cancela Ã© o token. User-agent genÃ©rico (nada sobre o usuÃ¡rio ou o projeto).
+        // Sem timeout no cliente: a release tem ~37 MB e uma linha lenta não pode abortar; quem
+        // cancela é o token. User-agent genérico (nada sobre o usuário ou o projeto).
         var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("MsxAudio-Installer/1.0");
         client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
@@ -52,7 +52,7 @@ public static class MsxScopeInstaller
 
     /// <summary>
     /// Arquivo da release para o SO/arquitetura atual:
-    /// <c>MSXScope-win-x64.zip</c>, <c>MSXScope-linux-arm64.tar.gz</c>, <c>MSXScope-osx-x64.tar.gz</c>â€¦
+    /// <c>MSXScope-win-x64.zip</c>, <c>MSXScope-linux-arm64.tar.gz</c>, <c>MSXScope-osx-x64.tar.gz</c>…
     /// </summary>
     public static string? AssetName
     {
@@ -82,10 +82,10 @@ public static class MsxScopeInstaller
         }
     }
 
-    /// <summary>Nome do executÃ¡vel instalado (sem extensÃ£o fora do Windows).</summary>
+    /// <summary>Nome do executável instalado (sem extensão fora do Windows).</summary>
     public static string ExecutableName => OperatingSystem.IsWindows() ? "MSXScope.exe" : "MSXScope";
 
-    /// <summary>O executÃ¡vel jÃ¡ instalado (a versÃ£o mais recente presente), ou nulo.</summary>
+    /// <summary>O executável já instalado (a versão mais recente presente), ou nulo.</summary>
     public static string? Locate()
     {
         if (!Directory.Exists(InstallRoot))
@@ -134,7 +134,7 @@ public static class MsxScopeInstaller
     }
 
     /// <summary>
-    /// Baixa e instala <paramref name="release"/>, devolvendo o caminho do executÃ¡vel.
+    /// Baixa e instala <paramref name="release"/>, devolvendo o caminho do executável.
     /// </summary>
     public static async Task<string> InstallAsync(MsxScopeRelease release,
         IProgress<(long Done, long Total)>? progress, CancellationToken token = default)
@@ -181,7 +181,7 @@ public static class MsxScopeInstaller
             if (exe is null)
                 throw new InvalidDataException("the archive has no " + ExecutableName);
 
-            // Linux/macOS: o tar nÃ£o carrega a permissÃ£o de execuÃ§Ã£o no Windows; garante +x.
+            // Linux/macOS: o tar não carrega a permissão de execução no Windows; garante +x.
             if (!OperatingSystem.IsWindows())
                 File.SetUnixFileMode(exe,
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Wagenheimer.MsxAudio.Mixing;
 using Wagenheimer.MsxAudio.Playback;
@@ -113,7 +113,7 @@ public sealed class MsxAudioHost : IDisposable
     /// <summary>Keeps the audio queue full. Call once per frame.</summary>
     public void Update() => _player.Update();
 
-    // â”€â”€ Music â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Music ──────────────────────────────────────────────────────────────────
 
     /// <summary>Plays a song of the package (silently ignored when the id does not exist).</summary>
     /// <param name="id">Package id (e.g. <c>stage_a</c>).</param>
@@ -145,7 +145,7 @@ public sealed class MsxAudioHost : IDisposable
     /// <summary>Cuts the music.</summary>
     public void StopMusic() => _player.StopSong();
 
-    // â”€â”€ Effects â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Effects ────────────────────────────────────────────────────────────────
 
     /// <summary>Plays an effect of the package (silently ignored when the id does not exist).</summary>
     public void PlayEffect(string id) => _player.PlaySample(id);
@@ -168,7 +168,7 @@ public sealed class MsxAudioHost : IDisposable
     /// <summary>Stops every effect.</summary>
     public void StopAllEffects() => _player.StopAllSamples();
 
-    // â”€â”€ Profile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Profile ────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Switches the mixing profile, rebuilding the engine and resuming the same song.

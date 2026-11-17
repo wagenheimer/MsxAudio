@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -158,7 +158,7 @@ public sealed class RomScanResult
 
     /// <summary>
     /// Builds a <c>.msxaudio</c> library from the songs found. <paramref name="names"/> renames ids
-    /// (<c>11 â†’ "ingame"</c>); ids without a name keep <c>id_NN</c>.
+    /// (<c>11 → "ingame"</c>); ids without a name keep <c>id_NN</c>.
     /// </summary>
     public Songs.MsxAudioLibrary ToLibrary(string title, IReadOnlyDictionary<int, string>? names = null)
     {

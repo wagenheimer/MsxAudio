@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.Xna.Framework.Audio;
 using Wagenheimer.MsxAudio.Playback;
 
@@ -9,7 +9,7 @@ namespace Wagenheimer.MsxAudio.MonoGame;
 /// single <see cref="DynamicSoundEffectInstance"/> (streaming, no intermediate file).
 /// </summary>
 /// <remarks>
-/// <para>Call <see cref="Update"/> once per frame â€” it keeps the buffer queue full. Instead of the
+/// <para>Call <see cref="Update"/> once per frame — it keeps the buffer queue full. Instead of the
 /// <c>BufferNeeded</c> event (which may fire on another thread), buffers are submitted on the game
 /// thread, which avoids contention with <see cref="PlaySong"/>.</para>
 ///
@@ -33,7 +33,7 @@ public sealed class MsxAudioPlayer : IDisposable
 
     /// <summary>Creates the player.</summary>
     /// <param name="engine">Engine with the library already loaded.</param>
-    /// <param name="chunkFrames">Frames per buffer (1024 â‰ˆ 21 ms at 48 kHz).</param>
+    /// <param name="chunkFrames">Frames per buffer (1024 ≈ 21 ms at 48 kHz).</param>
     public MsxAudioPlayer(MsxAudioEngine engine, int chunkFrames = 1024)
     {
         _engine = engine ?? throw new ArgumentNullException(nameof(engine));

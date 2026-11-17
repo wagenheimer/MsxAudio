@@ -129,6 +129,12 @@ public sealed class MiniMsx
     /// </summary>
     public Action<int, byte, ushort>? RamWriteHook { get; set; }
 
+    /// <summary>
+    /// Chamado a cada leitura de RAM (endereço, PC) — diagnóstico para descobrir de **onde** uma rotina
+    /// lê (ex.: a lista de entidades que o driver de sprites percorre).
+    /// </summary>
+    public Action<int, ushort>? RamReadHook { get; set; }
+
     /// <summary>Things worth telling the user about the boot (missing header, INIT that never returns...).</summary>
     public List<string> Warnings { get; } = new();
 
@@ -1015,6 +1021,7 @@ public sealed class MiniMsx
                 return _cartridge.Read(address);
 
             case 3:
+                RamReadHook?.Invoke(a, _cpu.Registers.PC);
                 return _ram[a];
 
             default:
