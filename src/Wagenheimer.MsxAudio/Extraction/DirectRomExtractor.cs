@@ -66,6 +66,9 @@ public static class DirectRomExtractor
 
         foreach (int id in profile.Ids)
         {
+            string name = profile.Names.TryGetValue(id, out var friendly) ? friendly : $"id_{id:00}";
+            log?.Invoke($"AUDIO: {name.ToUpperInvariant()} ({done + 1}/{profile.Ids.Count})...");
+
             double duration = profile.SecondsById.TryGetValue(id, out double specific)
                 ? specific
                 : profile.MusicIds.Contains(id) ? profile.SecondsPerSong : profile.SecondsPerId;
@@ -106,7 +109,6 @@ public static class DirectRomExtractor
                 if (loop is { } found) vgm.SetLoop(found.Start, found.Duration);
             }
 
-            string name = profile.Names.TryGetValue(id, out var friendly) ? friendly : $"id_{id:00}";
             var song = music
                 ? library.AddSong(name, name, vgm, vgm.HasLoop, vgm.LoopStartSeconds, vgm.LoopSeconds, id, "music")
                 : library.AddClip(name, name, vgm, id, "sfx");

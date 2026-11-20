@@ -44,12 +44,37 @@ public static class VgmLoopFinder
 
         long minSpan = (long)(minSpanSeconds * 44100.0);
         long minPeriod = (long)(4 * 44100.0);
+        long maxPeriod = (long)(90 * 44100.0);
         int maxStart = n / 3;
 
         for (int start = 0; start < maxStart; start += 40)
         {
-            for (int k = 50; start + k < n; k++)
+            long targetMin = times[start] + minPeriod;
+            long targetMax = times[start] + maxPeriod;
+
+            // Fast binary search to find the first k where period >= minPeriod
+            int low = 50;
+            int high = n - start - 1;
+            int kStart = high;
+            while (low <= high)
             {
+                int mid = (low + high) / 2;
+                if (times[start + mid] >= targetMin)
+                {
+                    kStart = mid;
+                    high = mid - 1;
+                }
+                else
+                {
+                    low = mid + 1;
+                }
+            }
+
+            for (int k = kStart; start + k < n; k++)
+            {
+                if (times[start + k] > targetMax)
+                    break;
+
                 if (signature[start] != signature[start + k])
                     continue;
 
