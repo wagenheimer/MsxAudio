@@ -69,12 +69,9 @@ public sealed partial class VisualizerGame
         _dialog = DialogKind.Export;
     }
 
-    private string DefaultExportFolder()
-    {
-        string source = _selected >= 0 && _selected < _tracks.Count ? _tracks[_selected].Path : _scanRoot;
-        string folder = Directory.Exists(source) ? source : Path.GetDirectoryName(source) ?? _scanRoot;
-        return Path.Combine(folder, "export");
-    }
+    /// <summary><c>&lt;MSXMusic&gt;/export</c>: the shared folder, inside the same place the ROMs go.</summary>
+    private static string DefaultExportFolder() =>
+        Path.Combine(MsxAudioPaths.Home, "export");
 
     // ── Input ────────────────────────────────────────────────────────────────────
 

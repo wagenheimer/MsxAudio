@@ -199,18 +199,19 @@ public sealed partial class VisualizerGame : Game
         Content.RootDirectory = "Content";
         IsMouseVisible = true;
         Window.AllowUserResizing = true;
-        Window.Title = $"MSXScope v{AppVersion.Value} — MSX audio player & chip analyser (PSG AY-3-8910 + Konami SCC)";
+        Window.Title = $"MSXScope v{AppVersion.Value} - MSX audio player & chip analyser (PSG AY-3-8910 + Konami SCC)";
 
         _startFile = file;
 
-        // No positional argument: reopen the last folder when it still exists.
+        // No positional argument: the shared MSXMusic folder (created on demand), so the first run never
+        // lands in whatever folder the shortcut happened to be launched from.
         string? startDir = null;
         if (file is not null)
             startDir = Path.GetDirectoryName(Path.GetFullPath(file));
         else if (!string.IsNullOrWhiteSpace(startFolder))
             startDir = startFolder;
-        else if (!string.IsNullOrWhiteSpace(_settings.LastFolder) && Directory.Exists(_settings.LastFolder))
-            startDir = _settings.LastFolder;
+        else
+            startDir = MsxAudioPaths.EnsureHome();
 
         _startDir = startDir ?? Directory.GetCurrentDirectory();
 

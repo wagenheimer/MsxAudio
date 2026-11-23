@@ -6,6 +6,21 @@ All notable changes to this package are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **MSXMusic, the shared folder** (`MsxAudioPaths`): every extraction and export goes to one folder that
+  MSXScope and the games share — `~/Music/MSXMusic` on Windows, Linux and macOS — with one subfolder per
+  game (`MsxAudioPaths.ForGame`). The root can be moved without recompiling: `MSXAUDIO_HOME`, or
+  `musicRoot` in `msxaudio.json` (next to the executable or in the per-user settings folder).
+- MSXScope **opens `MSXMusic` by default** when it is started without a file or folder (it used to open
+  whatever folder the shortcut was launched from), creates it on demand, and the extraction/export
+  dialogs default to it.
+
+### Changed
+- MSXScope window title is ASCII (`MSXScope v1.1.0 - ...`): the em dash rendered as a diamond glyph in
+  some Windows title-bar themes.
+- Extraction output moved from `<rom folder>/extracted_audio/<rom name>` to `<MSXMusic>/<rom name>`;
+  the export dialog defaults to `<MSXMusic>/export`.
+
 ## [1.1.0] - 2026-11-12
 
 ### Added (auto mix, export, transport)

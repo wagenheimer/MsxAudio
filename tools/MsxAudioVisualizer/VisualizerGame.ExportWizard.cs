@@ -787,7 +787,7 @@ public sealed partial class VisualizerGame
         y = dy + 188;
         Text("OUTPUT", labelX, y + 6, Dim);
         _exOutHit = new Rectangle(fieldX, y, pathW, 18);
-        DrawPathField(_exOutHit, OutputFolder(), "(NEXT TO THE ROM)", _extractField == 3);
+        DrawPathField(_exOutHit, OutputFolder(), "(MSXMUSIC)", _extractField == 3);
         _exOutPasteHit = new Rectangle(fieldX + pathW + 6, y, 60, 18);
         DrawButton(_exOutPasteHit, "PASTE", false, Accent);
         _exOutBrowseHit = new Rectangle(fieldX + fieldW + 8, y, 84, 18);

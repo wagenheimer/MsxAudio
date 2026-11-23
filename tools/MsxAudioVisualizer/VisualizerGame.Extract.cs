@@ -149,8 +149,8 @@ public sealed partial class VisualizerGame : Game
     }
 
     /// <summary>
-    /// Sets the ROM (also used while typing). While the output folder is "auto" it follows the ROM:
-    /// <c>&lt;rom folder&gt;/extracted_audio</c>.
+    /// Sets the ROM (also used while typing). While the output folder is "auto" it follows the shared
+    /// folder: <c>&lt;MSXMusic&gt;/&lt;rom name&gt;</c>.
     /// </summary>
     private void SetRom(string path)
     {
@@ -160,7 +160,10 @@ public sealed partial class VisualizerGame : Game
             _extractOutDir = DefaultOutDir(path);
     }
 
-    /// <summary><c>&lt;folder of the ROM or archive&gt;/extracted_audio/&lt;rom name&gt;</c>.</summary>
+    /// <summary>
+    /// <c>&lt;MSXMusic&gt;/&lt;rom name&gt;</c> — the shared folder (<see cref="MsxAudioPaths.Home"/>), so
+    /// every extraction lands in the same place no matter where the cartridge lives.
+    /// </summary>
     private static string DefaultOutDir(string rom)
     {
         if (string.IsNullOrWhiteSpace(rom))
@@ -168,12 +171,10 @@ public sealed partial class VisualizerGame : Game
 
         try
         {
-            string path = rom.Trim('"');
-            string folder = Path.GetDirectoryName(Path.GetFullPath(path)) ?? string.Empty;
-            if (folder.Length == 0)
-                return string.Empty;
-
-            return Path.Combine(folder, "extracted_audio", CleanStem(path));
+            string name = CleanStem(rom.Trim('"'));
+            return name.Length == 0
+                ? MsxAudioPaths.Home
+                : Path.Combine(MsxAudioPaths.Home, name);
         }
         catch (Exception)
         {
@@ -1131,7 +1132,7 @@ public sealed partial class VisualizerGame : Game
         string folder = OutputFolder();
 
         _exOutHit = new Rectangle(fieldX, dy + 196, pathW, 18);
-        DrawPathField(_exOutHit, folder, "(NEXT TO THE ROM)", _extractField == 3);
+        DrawPathField(_exOutHit, folder, "(MSXMUSIC)", _extractField == 3);
 
         _exOutPasteHit = new Rectangle(fieldX + pathW + 6, dy + 196, 60, 18);
         DrawButton(_exOutPasteHit, "PASTE", false, Accent);

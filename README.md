@@ -188,10 +188,35 @@ another backend (SDL, NAudio, a custom mixer, the visualizer...).
 ## MSXScope, a tour
 
 **MSXScope** (`tools/MsxAudioVisualizer`) opens a **VGM**, a `.msxaudio` package, a folder or anything you drop
-on the window, plays it in real time and shows what the chips are doing. The last folder, view, mixing
+on the window, plays it in real time and shows what the chips are doing. With no file or folder it opens
+**`MSXMusic`**, the shared audio folder (see [below](#msxmusic-the-shared-folder)). The view, mixing
 profile, loop choice and window size are remembered (`%APPDATA%\MsxAudio\visualizer.json`, or a
 `visualizer.json` next to the executable for a portable install). The UI renders to a fixed **1280x720**
 target and is letterboxed into the window, so resizing never moves anything.
+
+### MSXMusic, the shared folder
+
+Everything that comes out of a cartridge — MSXScope extractions and every game that uses the package —
+lands in **one folder**, so there is a single place to look (and to open in an editor or a DAW):
+
+```
+Windows   %USERPROFILE%\Music\MSXMusic
+Linux     ~/Music/MSXMusic            (the XDG music folder)
+macOS     ~/Music/MSXMusic
+```
+
+- MSXScope and the games share the same root (`MsxAudioPaths.Home` in the library); each game writes in
+  its own subfolder (`MsxAudioPaths.ForGame("KingsValley2")`), so two `audio.msxaudio` never collide.
+- A ROM called `kingsvalley2.rom` extracts to `<MSXMusic>/kingsvalley2`, and exported WAV/MP3/MIDI go to
+  `<MSXMusic>/export`.
+- **To move the folder** (a bigger drive, a shared network path) there is nothing to recompile:
+  set the `MSXAUDIO_HOME` environment variable, or write `musicRoot` in `msxaudio.json` next to the
+  executable or in `%APPDATA%\MsxAudio\msxaudio.json` (`~/.config/MsxAudio/` on Linux,
+  `~/Library/Application Support/MsxAudio/` on macOS):
+
+```json
+{ "musicRoot": "E:\\GreenSauceGames\\MSXMusic" }
+```
 
 <p align="center"><img src="docs/media/spectrum.png" alt="MSXScope, spectrum view with the auto mix" width="900"></p>
 
@@ -307,7 +332,7 @@ code runs in the live player and in `MsxSoundRenderer`.
 | **MIDI** | the notes, for a DAW: one track per voice, a drum track, loop markers |
 
 - **Scope**: this song, or **every song in the list**. Any combination of formats at once. Files are named after the
-  songs (a pack's name is added to its songs), in a folder you can type, paste or open.
+  songs (a pack's name is added to its songs), by default in `<MSXMusic>/export`, in a folder you can type, paste or open.
 - **Loops and fade-out**: a song with a loop plays its intro, then the loop *N* times, then fades out over the
   seconds you choose. A song without a loop plays to its last note.
 - **SAME LOUDNESS: -14 LUFS**: measured with the ITU-R BS.1770 K-weighting and gating, so a whole playlist plays at
@@ -376,7 +401,7 @@ project's own GitHub releases, checked against its published size and SHA-256 an
 </tr></table>
 
 **MORE OPTIONS** opens the manual controls: capture / profile / scan, mapper, seconds, 50 or 60 Hz, the key script,
-auto-press, output folder and format. The result is written to `<rom folder>/extracted_audio/<rom name>` and opens
+auto-press, output folder and format. The result is written to `<MSXMusic>/<rom name>` and opens
 straight in the player. When nothing plays, the log says **why** (missing header, a chip that is not emulated,
 a BIOS service the game kept calling) instead of leaving you with a silent file.
 

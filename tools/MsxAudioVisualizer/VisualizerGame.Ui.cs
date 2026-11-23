@@ -38,6 +38,7 @@ public sealed partial class VisualizerGame : Game
         Rect(0, 45, VW, 1, Grid);
 
         Text("MSX SCOPE", 16, 12, Accent, 2);
+        Text("V" + AppVersion.Value, 136, 19, Dim);
         Text("PLAYER & CHIP ANALYSER - PSG AY-3-8910 + KONAMI SCC", 16, 30, Dim);
 
         var p = _player;

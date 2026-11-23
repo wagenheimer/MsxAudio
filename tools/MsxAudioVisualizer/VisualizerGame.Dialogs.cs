@@ -57,13 +57,16 @@ public sealed partial class VisualizerGame : Game
 
     private const int DialogRows = 21;   // visible rows in each browser list
 
+    /// <summary>Shared audio folder (<c>MSXMusic</c>), created on demand — the default place to start.</summary>
+    private static string DefaultFolder() => MsxAudioPaths.EnsureHome();
+
     private void OpenFolderDialog()
     {
         string dir = _scanRoot.Length > 0 && Directory.Exists(_scanRoot)
             ? _scanRoot
             : _settings.LastFolder is { } last && Directory.Exists(last)
                 ? last
-                : Directory.GetCurrentDirectory();
+                : DefaultFolder();
 
         _dialog = DialogKind.Folder;
         _browserPattern = "*.vgm";
@@ -78,13 +81,11 @@ public sealed partial class VisualizerGame : Game
     private void OpenRomBrowser()
     {
         string dir = _extractRom.Length > 0
-            ? Path.GetDirectoryName(_extractRom) ?? Directory.GetCurrentDirectory()
-            : Directory.GetCurrentDirectory();
+            ? Path.GetDirectoryName(_extractRom) ?? DefaultFolder()
+            : DefaultFolder();
 
         if (!Directory.Exists(dir))
-            dir = _settings.LastFolder is { } last && Directory.Exists(last)
-                ? last
-                : Directory.GetCurrentDirectory();
+            dir = _settings.LastFolder is { } last && Directory.Exists(last) ? last : DefaultFolder();
 
         _dialog = DialogKind.Folder;
         _browserPattern = "*.rom,*.zip";
@@ -102,7 +103,7 @@ public sealed partial class VisualizerGame : Game
             ? _extractOutDir
             : _extractRom.Length > 0 && Directory.Exists(Path.GetDirectoryName(_extractRom))
                 ? Path.GetDirectoryName(_extractRom)!
-                : Directory.GetCurrentDirectory();
+                : DefaultFolder();
 
         _dialog = DialogKind.Folder;
         _browserPattern = "*.";
@@ -117,11 +118,11 @@ public sealed partial class VisualizerGame : Game
     private void OpenProfileBrowser()
     {
         string dir = _extractProfile.Length > 0
-            ? Path.GetDirectoryName(_extractProfile) ?? Directory.GetCurrentDirectory()
-            : Directory.GetCurrentDirectory();
+            ? Path.GetDirectoryName(_extractProfile) ?? DefaultFolder()
+            : DefaultFolder();
 
         if (!Directory.Exists(dir))
-            dir = Directory.GetCurrentDirectory();
+            dir = DefaultFolder();
 
         _dialog = DialogKind.Folder;
         _browserPattern = "*.json";

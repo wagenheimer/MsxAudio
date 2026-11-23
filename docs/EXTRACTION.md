@@ -73,6 +73,11 @@ override it, and `MsxAudioTool rom-info` prints what was decided.
 | **Scan** | `RomSoundScan.Run` | no (optional) | the ids the driver accepts, classified music/sfx, deduplicated |
 | **Profile** | `DirectRomExtractor.Extract` | yes | every id with its name and duration |
 
+Every mode writes into the shared **MSXMusic** folder: `<MSXMusic>/<rom name>` from MSXScope and
+`<MSXMusic>/<game>` from a game that uses the package (`MsxAudioPaths.Home` / `MsxAudioPaths.ForGame`).
+The root is `~/Music/MSXMusic` on every system and can be moved with `MSXAUDIO_HOME` or `musicRoot` in
+`msxaudio.json` (README, *MSXMusic, the shared folder*).
+
 ### Capture
 
 Boots the ROM, sends the key script and records. `--auto 1` (the **AUTO-PRESS** chip) taps fire at 1 s and

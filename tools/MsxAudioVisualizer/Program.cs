@@ -21,14 +21,15 @@ namespace Wagenheimer.MsxAudio.Visualizer;
 ///   --audio-only out.wav        render the audio only, without opening a window
 ///   --version                   print the version and exit
 /// </code>
-/// With no positional argument it reopens the last folder from the settings file.
+/// With no positional argument it opens the shared <c>MSXMusic</c> folder (see
+/// <see cref="MsxAudioPaths"/>), created on demand.
 /// </summary>
 public static class Program
 {
     public static void Main(string[] args)
     {
         string? file = null;
-        string dir = Directory.GetCurrentDirectory();
+        string dir = MsxAudioPaths.EnsureHome();
         string? explicitFolder = null;
         string? record = null;
         string? audioOnly = null;
