@@ -100,7 +100,10 @@ public sealed class MsxAudioEngine : IDisposable
             _voices.RemoveAt(0);
 
         (float left, float right) = Pan(pan);
-        _voices.Add(new SampleVoice(id, data, volume, left, right));
+        int loopStart = clip.Loop && clip.LoopSeconds > 0
+            ? (int)Math.Round(clip.LoopStart * SampleRate) : -1;
+        if (loopStart >= data.Length) loopStart = -1;
+        _voices.Add(new SampleVoice(id, data, volume, left, right, loopStart));
     }
 
     /// <summary>Stops a specific effect (when playing).</summary>
@@ -165,19 +168,23 @@ public sealed class MsxAudioEngine : IDisposable
             SampleVoice voice = _voices[v];
             float[] data = voice.Data;
             int position = voice.Position;
-            int count = Math.Min(frames, data.Length - position);
             float left = voice.Volume * gain * voice.PanLeft;
             float right = voice.Volume * gain * voice.PanRight;
 
-            for (int i = 0; i < count; i++)
+            for (int i = 0; i < frames; i++)
             {
-                float value = data[position + i];
+                if (position >= data.Length)
+                {
+                    if (voice.LoopStart < 0) break;
+                    position = voice.LoopStart;
+                }
+                float value = data[position++];
                 destination[i * 2] += value * left;
                 destination[i * 2 + 1] += value * right;
             }
 
-            voice.Position = position + count;
-            if (voice.Position >= data.Length) _voices.RemoveAt(v);
+            voice.Position = position;
+            if (voice.Position >= data.Length && voice.LoopStart < 0) _voices.RemoveAt(v);
         }
 
         // limit the final sum (avoids clipping when music and effects coincide)
@@ -206,7 +213,8 @@ public sealed class MsxAudioEngine : IDisposable
 
         // 2) VGM (chip effect): render and convert to mono
         var vgm = _library.LoadVgm(clip);
-        double end = MsxSoundRenderer.FindAudibleEnd(vgm);
+        double end = clip.Loop && clip.LoopSeconds > 0
+            ? clip.LoopStart + clip.LoopSeconds : MsxSoundRenderer.FindAudibleEnd(vgm);
         var sampleProfile = Profile.WithOversample(Math.Min(Profile.Oversample, 2));
         var audio = MsxSoundRenderer.Render(vgm, sampleProfile, SampleRate, 0, end);
         var samples = new float[audio.Frames];
@@ -225,18 +233,20 @@ public sealed class MsxAudioEngine : IDisposable
 
     private sealed class SampleVoice
     {
-        public SampleVoice(string id, float[] data, float volume, float panLeft, float panRight)
+        public SampleVoice(string id, float[] data, float volume, float panLeft, float panRight, int loopStart)
         {
             Id = id;
             Data = data;
             Volume = volume;
             PanLeft = panLeft;
             PanRight = panRight;
+            LoopStart = loopStart;
         }
 
         public string Id { get; }
         public float[] Data { get; }
         public int Position { get; set; }
+        public int LoopStart { get; }
         public float Volume { get; }
         public float PanLeft { get; }
         public float PanRight { get; }
@@ -322,16 +332,12 @@ public sealed class MsxAudioEngine : IDisposable
             var events = vgm.Events;
             _startIndex = _loop ? FindIndex(events, (long)_loopStart) : 0;
             _endIndex = _loop ? FindIndex(events, (long)(_loopStart + _loopLength)) : events.Count;
-            _position = _loop ? _loopStart : 0;
+            // The loop marker is a repeat destination, not the initial playback position.
+            // Play the introduction once, then preserve chip state while repeating the loop.
+            _position = 0;
             _endOfSong = MsxSoundRenderer.FindAudibleEnd(vgm, 1.5) * 44100.0;
 
-            // warm the chip state up to the loop start (registers only, no audio)
             _index = 0;
-            while (_index < _startIndex)
-            {
-                Apply(events[_index]);
-                _index++;
-            }
 
             int bufferSize = ChunkFrames * _oversample;
             _psgBuffer = new[] { new float[bufferSize], new float[bufferSize], new float[bufferSize] };

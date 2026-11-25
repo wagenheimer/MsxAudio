@@ -177,6 +177,24 @@ public static class AutoMixAnalyzer
         var tracks = Enumerable.Range(0, 8).Select(_ => new Track()).ToArray();
         double last = 0;
 
+        void Accumulate(double dt)
+        {
+            if (dt <= 0) return;
+            for (int c = 0; c < 8; c++)
+            {
+                State state = StateOf(c, psg, sccRegs, sccVolume, sccEnable, psgClock);
+                if (!state.Audible) continue;
+                Track t = tracks[c];
+                t.Audible += dt;
+                t.VolumeTime += state.Volume * dt;
+                if (state.Noise)
+                {
+                    t.Noise += dt;
+                    if (!state.Tone) t.NoiseOnly += dt;
+                }
+            }
+        }
+
         IReadOnlyList<VgmEvent> events = vgm.Events;
 
         for (int index = 0; index < events.Count;)
@@ -185,26 +203,7 @@ public static class AutoMixAnalyzer
             double dt = now - last;
             last = now;
 
-            if (dt > 0)
-            {
-                for (int c = 0; c < 8; c++)
-                {
-                    State state = StateOf(c, psg, sccRegs, sccVolume, sccEnable, psgClock);
-                    if (!state.Audible)
-                        continue;
-
-                    Track t = tracks[c];
-                    t.Audible += dt;
-                    t.VolumeTime += state.Volume * dt;
-
-                    if (state.Noise)
-                    {
-                        t.Noise += dt;
-                        if (!state.Tone)
-                            t.NoiseOnly += dt;
-                    }
-                }
-            }
+            Accumulate(dt);
 
             // All the writes of one instant are applied before the registers are read: a pitch is two
             // bytes, and the half-written one is not a note.
@@ -236,6 +235,8 @@ public static class AutoMixAnalyzer
                 DetectNote(tracks[c], StateOf(c, psg, sccRegs, sccVolume, sccEnable, psgClock), now);
         }
 
+        // A held note remains audible after its last register write.
+        Accumulate(Math.Max(0, vgm.TotalSeconds - last));
         AutoMixPlan plan = Assign(tracks, vgm.TotalSeconds);
 
         // The tempo, from where the tune, the bass and the drums start: it sets the echo times.
@@ -306,7 +307,6 @@ public static class AutoMixAnalyzer
 
     private static AutoMixPlan Assign(Track[] tracks, double totalSeconds)
     {
-        double minAudible = Math.Max(0.4, totalSeconds * 0.03);
         var channels = new ChannelMix[8];
         var roles = new ChannelRole[8];
 
@@ -314,7 +314,8 @@ public static class AutoMixAnalyzer
         {
             Track t = tracks[c];
 
-            if (t.Audible < minAudible)
+            // Role confidence must never mute a real transient or short effect.
+            if (t.Audible <= 0)
                 roles[c] = ChannelRole.Silent;
             else if (c < 3 && t.NoiseOnly + 0.5 * (t.Noise - t.NoiseOnly) >= 0.5 * t.Audible)
                 roles[c] = ChannelRole.Percussion;

@@ -18,4 +18,9 @@
     <ProjectReference Include="..\..\src\Wagenheimer.MsxAudio\Wagenheimer.MsxAudio.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="../../tools/MSXScope/Library.cs" Link="Player/Library.cs" />
+    <Compile Include="../../tools/MSXScope/DurationText.cs" Link="Player/DurationText.cs" />
+    <Compile Include="../../tools/MSXScope/VgmPlayer.cs" Link="Player/VgmPlayer.cs" />
+  </ItemGroup>
 </Project>

@@ -187,7 +187,7 @@ another backend (SDL, NAudio, a custom mixer, the visualizer...).
 
 ## MSXScope, a tour
 
-**MSXScope** (`tools/MsxAudioVisualizer`) opens a **VGM**, a `.msxaudio` package, a folder or anything you drop
+**MSXScope** (`tools/MSXScope`) opens a **VGM**, a `.msxaudio` package, a folder or anything you drop
 on the window, plays it in real time and shows what the chips are doing. With no file or folder it opens
 **`MSXMusic`**, the shared audio folder (see [below](#msxmusic-the-shared-folder)). The view, mixing
 profile, loop choice and window size are remembered (`%APPDATA%\MsxAudio\visualizer.json`, or a
@@ -196,42 +196,60 @@ target and is letterboxed into the window, so resizing never moves anything.
 
 ### MSXMusic, the shared folder
 
-Everything that comes out of a cartridge — MSXScope extractions and every game that uses the package —
-lands in **one folder**, so there is a single place to look (and to open in an editor or a DAW):
+MSXScope opens the shared library recursively by default, so audio extracted by games appears without
+browsing to their folders. Existing `.msxaudio` packages and loose VGMs remain supported. Packages show
+their manifest title and cartridge variant; old packages are labelled `[UNKNOWN]` rather than
+guessing MSX1/MSX2. Use the visible **ALL / MUSIC / SFX** buttons (with counts), or press **F5** to cycle them. The library panel reserves space for cartridge badges and durations, and offers **SHOW ALL TRACKS** when a filter has no matches. Next/previous and auto-next follow that filter.
+Package changes are monitored and rescanned after a short debounce without restarting the current track.
 
-```
-Windows   %USERPROFILE%\Music\MSXMusic
-Linux     ~/Music/MSXMusic            (the XDG music folder)
-macOS     ~/Music/MSXMusic
-```
+The root remains the user's music folder plus `MSXMusic` (Windows, Linux/XDG and macOS).
+`MSXAUDIO_HOME` overrides `musicRoot` in `msxaudio.json`, which overrides the default. A portable
+configuration next to one executable affects that application; use the per-user configuration or the
+environment variable when all games and MSXScope must share a moved library.
 
-- MSXScope and the games share the same root (`MsxAudioPaths.Home` in the library); each game writes in
-  its own subfolder (`MsxAudioPaths.ForGame("KingsValley2")`), so two `audio.msxaudio` never collide.
-- A ROM called `kingsvalley2.rom` extracts to `<MSXMusic>/kingsvalley2`, and exported WAV/MP3/MIDI go to
-  `<MSXMusic>/export`.
-- **To move the folder** (a bigger drive, a shared network path) there is nothing to recompile:
-  set the `MSXAUDIO_HOME` environment variable, or write `musicRoot` in `msxaudio.json` next to the
-  executable or in `%APPDATA%\MsxAudio\msxaudio.json` (`~/.config/MsxAudio/` on Linux,
-  `~/Library/Application Support/MsxAudio/` on macOS):
+New producers use stable lowercase ids and separate cartridge variants:
 
-```json
-{ "musicRoot": "E:\\GreenSauceGames\\MSXMusic" }
+```text
+MSXMusic/
+  kings-valley-2/
+    msx1/Audio/audio.msxaudio
+    msx2/Audio/audio.msxaudio
 ```
 
-<p align="center"><img src="docs/media/spectrum.png" alt="MSXScope, spectrum view with the auto mix" width="900"></p>
+```csharp
+using Wagenheimer.MsxAudio;
+using Wagenheimer.MsxAudio.Songs;
 
-What is on the screen:
+string destination = MsxAudioPaths.PackagePath("kings-valley-2", "msx1");
+library.Manifest.Identity = new MsxAudioIdentity
+{
+    GameId = "kings-valley-2",
+    Variant = "msx1",
+    RomSha1 = romSha1,
+    ProfileId = "kings-valley-2-msx1",
+    ProfileVersion = "1",
+    ExtractorVersion = "1.1.0"
+};
+library.Save(destination); // unique temporary file, flush, then replace the published package
+var catalog = AudioCatalog.Scan(MsxAudioPaths.Home);
+// catalog.Packages contains manifest metadata only; catalog.Issues reports unreadable packages.
+```
 
-- **POSITION** bar with `current / total` and the loop window; click or drag to seek.
-- **Transport** at the bottom: previous, play/pause, **stop**, next, the **AT END** choice, volume, the **A-B loop**
-  and the **PSG / SCC** switches. Previous restarts the song after 3 s and goes back one song before that.
-- **One strip per channel** (3 PSG + 5 SCC) with a live scope, volume, level with peak hold, frequency, nearest
-  note, key state and, for the SCC, the **32-sample wave RAM**. Each channel has its own colour, the same in
-  the roll and the piano. With the **auto mix** every strip also says what the channel is doing:
-  `LEAD`, `BASS`, `ARP`, `PAD` or `DRUM`.
-- **Solo** by clicking a channel label (or `S`), **mute** with `M`.
-- The **MASTER** scope and the channel scopes draw a min/max envelope per pixel column, so peaks are not
-  averaged away.
+`PackagePath` resolves paths without creating folders. Ids cannot contain path separators, traversal or
+reserved device names. `ForGame` remains available for older integrations. No existing folders are moved
+or rewritten automatically. `.msxaudio` remains `msxaudio/1`; identity is optional metadata.
+
+Curated extraction profiles may declare `gameId`, `variant`, `profileId` and `profileVersion`. Both direct
+and openMSX profile extraction record the resolved ROM hash and extractor version. Identified profiles
+with known ROM hashes reject a mismatch. MSXScope writes identified profile extractions to the canonical
+variant path; manual output folders remain possible. Existing output is not silently overwritten by the
+extraction assistant. Unknown profiles retain their existing filename-based output and carry no guessed
+variant. The bundled King's Valley II profile identifies **MSX1 only**; no MSX2 profile is implied.
+
+For an already running older installation, rebuild/install the updated MSXScope to get auto-discovery.
+The game must adopt these library APIs to publish new version-separated packages. Its old mixed package
+can still be discovered, but cannot be identified retroactively without reliable provenance.
+
 
 ### The three views
 
@@ -702,7 +720,7 @@ src/Wagenheimer.MsxAudio/             core (pure C#, no engine dependency)
                DirectRomExtractor (+ profiles), OpenMsx (locator, installer, capture), OpenMsxRomExtractor, VgmImporter
 src/Wagenheimer.MsxAudio.MonoGame/    MsxAudioPlayer (DynamicSoundEffectInstance)
 tools/MsxAudioTool/                   extractor / import / export CLI
-tools/MsxAudioVisualizer/             MSXScope: MonoGame visual player (views, track list, export, assistant)
+tools/MSXScope/             MSXScope: MonoGame visual player (views, track list, export, assistant)
 tests/Wagenheimer.MsxAudio.Tests/     chips, VGM, package, engine, MSX machine, mixing, export, loudness
 profiles/                             per-game extraction profiles (JSON, with the ROM hashes)
 docs/                                 EXTRACTION.md (deep dive), screenshots

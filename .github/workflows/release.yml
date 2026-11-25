@@ -37,7 +37,7 @@ jobs:
 
       - name: Publish (self-contained)
         run: >
-          dotnet publish tools/MsxAudioVisualizer/MsxAudioVisualizer.csproj
+          dotnet publish tools/MSXScope/MSXScope.csproj
           -c Release -r ${{ matrix.rid }} --self-contained true
           -p:DebugType=None -p:DebugSymbols=false
           -o "dist/MSXScope-${{ matrix.rid }}"

@@ -18,6 +18,35 @@ public class AutoMixTests
 
     private const double Clock = 1789772.5;
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void ShortEffectsAndHeldNotesAreNeverClassifiedAsSilent(bool scc, bool explicitStop)
+    {
+        var events = new List<VgmEvent>();
+        if (scc)
+        {
+            for (int i = 0; i < 32; i++) events.Add(new(0, VgmEventKind.Scc, 0, (byte)i, (byte)(i < 16 ? 90 : 166)));
+            events.Add(new(0, VgmEventKind.Scc, 1, 0, 100));
+            events.Add(new(0, VgmEventKind.Scc, 2, 0, 15));
+            events.Add(new(0, VgmEventKind.Scc, 3, 0, 1));
+            if (explicitStop) events.Add(new(11025, VgmEventKind.Scc, 3, 0, 0));
+        }
+        else
+        {
+            events.Add(new(0, VgmEventKind.Psg, 0, 100, 0));
+            events.Add(new(0, VgmEventKind.Psg, 7, 0x3E, 0));
+            events.Add(new(0, VgmEventKind.Psg, 8, 15, 0));
+            if (explicitStop) events.Add(new(11025, VgmEventKind.Psg, 8, 0, 0));
+        }
+        var vgm = VgmFile.FromEvents(events, 13230, Clock, "short effect");
+        var plan = AutoMixAnalyzer.Analyze(vgm);
+        Assert.NotEqual(ChannelRole.Silent, plan.Channels[scc ? 3 : 0].Role);
+        Assert.True(MsxSoundRenderer.Render(vgm, AudioProfile.ByName("auto"), 8000).Peak > 0.005f);
+    }
+
     private static (byte Low, byte High) Period(double frequency)
     {
         int period = (int)Math.Round(Clock / (16.0 * frequency));

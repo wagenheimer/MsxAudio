@@ -6,7 +6,19 @@ All notable changes to this package are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-25
+
+### Fixed
+- Game streaming now plays song introductions from sample zero before repeating the declared loop.
+  Restarting a stage theme also restarts its introduction; saved packages do not need re-extraction.
+
 ### Added
+- Version-separated shared package paths (`MsxAudioPaths.PackagePath`) and manifest-only discovery
+  (`AudioCatalog`) with diagnostics for unreadable packages.
+- Optional game/variant, ROM hash and extraction-profile provenance in `.msxaudio` manifests.
+- Recursive MSXScope startup discovery, debounced package monitoring and All/Music/SFX filtering (F5).
+- Temporary-directory regression coverage for identity, legacy compatibility, variant isolation and
+  stable playlist ordering.
 - **MSXMusic, the shared folder** (`MsxAudioPaths`): every extraction and export goes to one folder that
   MSXScope and the games share — `~/Music/MSXMusic` on Windows, Linux and macOS — with one subfolder per
   game (`MsxAudioPaths.ForGame`). The root can be moved without recompiling: `MSXAUDIO_HOME`, or
@@ -16,6 +28,16 @@ All notable changes to this package are documented here. The format follows
   dialogs default to it.
 
 ### Changed
+- Wider MSXScope library with clickable counted ALL/MUSIC/SFX segments, separate folding controls,
+  protected cartridge badges, aligned durations and empty-filter recovery. Analyzer bounds now share
+  named layout constants; the smaller-window layout preserves the full transport and all three views.
+- Package file saves now publish through a unique temporary file; readers never need to observe a
+  partially written ZIP. Profile extractions can use canonical variant destinations and reject
+  mismatched known ROM hashes.
+- Player project moved to `tools/MSXScope/MSXScope.csproj`, namespace `Wagenheimer.MsxAudio.Scope`;
+  executable and release archive names remain MSXScope. Game library package names are unchanged.
+- Playing a track no longer narrows the library scan to that package's directory. New library
+  discoveries preserve the playing selection and stream. Legacy packages display `[UNKNOWN]`.
 - MSXScope window title is ASCII (`MSXScope v1.1.0 - ...`): the em dash rendered as a diamond glyph in
   some Windows title-bar themes.
 - Extraction output moved from `<rom folder>/extracted_audio/<rom name>` to `<MSXMusic>/<rom name>`;

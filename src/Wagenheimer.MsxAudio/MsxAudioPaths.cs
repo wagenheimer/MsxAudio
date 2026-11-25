@@ -89,6 +89,22 @@ public static class MsxAudioPaths
         return folder;
     }
 
+    /// <summary>Canonical package path for a game and cartridge variant. Does not create directories.</summary>
+    public static string PackagePath(string gameId, string variant, string? root = null)
+    {
+        ValidateIdentifier(gameId);
+        ValidateIdentifier(variant);
+        return Path.Combine(Path.GetFullPath(root ?? Home), gameId, variant, "Audio", "audio.msxaudio");
+    }
+
+    private static void ValidateIdentifier(string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        if (!System.Text.RegularExpressions.Regex.IsMatch(value, "^[a-z0-9]+(?:-[a-z0-9]+)*$") ||
+            System.Text.RegularExpressions.Regex.IsMatch(value, "^(con|prn|aux|nul|com[0-9]|lpt[0-9])$"))
+            throw new ArgumentException("Use a lowercase identifier with letters, digits and separating hyphens.", nameof(value));
+    }
+
     /// <summary>Replaces characters that are not allowed in a folder name with <c>_</c>.</summary>
     internal static string Sanitize(string name)
     {

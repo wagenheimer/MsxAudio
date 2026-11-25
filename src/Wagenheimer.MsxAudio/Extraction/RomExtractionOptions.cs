@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
@@ -37,6 +37,44 @@ public sealed class KeyStep
 /// </remarks>
 public sealed class RomExtractionProfile
 {
+    /// <summary>Stable collection id; together with Variant enables canonical shared-library paths.</summary>
+    public string? GameId { get; set; }
+    /// <summary>Cartridge variant, for example msx1 or msx2. Never inferred from a filename.</summary>
+    public string? Variant { get; set; }
+    /// <summary>Stable extraction profile identifier.</summary>
+    public string? ProfileId { get; set; }
+    /// <summary>Extraction profile revision.</summary>
+    public string? ProfileVersion { get; set; }
+
+    /// <summary>Run cartridge INIT before initializing the sound driver.</summary>
+    public bool BootCartridge { get; set; } = true;
+    /// <summary>Optional sound-driver initialization routine.</summary>
+    public int InitializeAddress { get; set; }
+    /// <summary>CPU window to ROM bank mapping reapplied before every driver call.</summary>
+    public Dictionary<int, int> DriverBanks { get; set; } = new();
+    /// <summary>Authentic ROM code/data copied to RAM before driver initialization.</summary>
+    public List<RomMemoryCopy> MemoryCopies { get; set; } = new();
+    /// <summary>Optional external SCC primary slot. -1 disables it.</summary>
+    public int ExternalSccSlot { get; set; } = -1;
+    /// <summary>Block sound commands originating in the game when using its interrupt hooks.</summary>
+    public bool BlockGameSoundCalls { get; set; } = true;
+    /// <summary>Driver ticks needed to consume the stop command before starting an ID.</summary>
+    public int StopSettleFrames { get; set; } = 3;
+    /// <summary>Music that must play once, even if a repeated passage is found.</summary>
+    public List<int> OneShotMusicIds { get; set; } = new();
+    /// <summary>ROM call-site evidence for sound names; IDs without evidence stay explicitly unidentified.</summary>
+    public Dictionary<int, string> NameSources { get; set; } = new();
+
+    /// <summary>True for diagnostic subsets, which must not satisfy a game's production cache checks.</summary>
+    public bool PartialExtraction { get; set; }
+    /// <summary>Required audible IDs. A full extraction fails if one is silent or absent.</summary>
+    public List<int> RequiredIds { get; set; } = new();
+    /// <summary>Tracks that require a measured loop before a complete package can be published.</summary>
+    public List<int> RequiredLoopIds { get; set; } = new();
+
+    /// <summary>Optional sequencer-state contract for automatic termination and loop measurement.</summary>
+    public DriverObservationOptions? DriverObservation { get; set; }
+
     /// <summary>Game/profile name.</summary>
     public string Name { get; set; } = "MSX";
 
@@ -113,6 +151,14 @@ public sealed class RomExtractionProfile
     public Dictionary<int, string> Names { get; set; } = new();
 }
 
+/// <summary>A range of authentic ROM bytes required in RAM by a relocated driver.</summary>
+public sealed class RomMemoryCopy
+{
+    public int RomOffset { get; set; }
+    public int Address { get; set; }
+    public int Length { get; set; }
+}
+
 /// <summary>Reads and writes <see cref="RomExtractionProfile"/> JSON files.</summary>
 public static class RomExtractionProfiles
 {
@@ -127,6 +173,52 @@ public static class RomExtractionProfiles
     public static RomExtractionProfile Load(string path) =>
         System.Text.Json.JsonSerializer.Deserialize<RomExtractionProfile>(System.IO.File.ReadAllText(path), Options)
         ?? throw new InvalidDataException($"invalid profile: {path}");
+
+    /// <summary>Returns a fresh curated profile for a specific game and cartridge variant.</summary>
+    public static RomExtractionProfile? FindByGameVariant(string gameId, string variant)
+    {
+        var assembly = typeof(RomExtractionProfiles).Assembly;
+        foreach (string resource in assembly.GetManifestResourceNames().OrderBy(n => n, StringComparer.Ordinal))
+        {
+            if (!resource.StartsWith("MsxAudio.Profiles.", StringComparison.Ordinal)) continue;
+            using var stream = assembly.GetManifestResourceStream(resource)!;
+            var profile = System.Text.Json.JsonSerializer.Deserialize<RomExtractionProfile>(stream, Options);
+            if (profile?.GameId == gameId && profile.Variant == variant) return profile;
+        }
+        return null;
+    }
+
+    /// <summary>Finds a curated embedded profile by the hash of the resolved ROM bytes.</summary>
+    public static RomExtractionProfile? FindForRom(byte[] rom)
+    {
+        string hash = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(rom));
+        var assembly = typeof(RomExtractionProfiles).Assembly;
+        foreach (string resource in assembly.GetManifestResourceNames().OrderBy(n => n, StringComparer.Ordinal))
+        {
+            if (!resource.StartsWith("MsxAudio.Profiles.", StringComparison.Ordinal)) continue;
+            using var stream = assembly.GetManifestResourceStream(resource)!;
+            var profile = System.Text.Json.JsonSerializer.Deserialize<RomExtractionProfile>(stream, Options);
+            if (profile?.RomSha1.Any(h => h.Equals(hash, StringComparison.OrdinalIgnoreCase)) == true) return profile;
+        }
+        return null;
+    }
+
+    /// <summary>Checks source and profile revision before reusing a published extraction.</summary>
+    public static bool IsCurrentPackage(string path, RomExtractionProfile profile)
+    {
+        try
+        {
+            var manifest = AudioCatalog.ReadManifest(path);
+            var identity = manifest.Identity;
+            var sounds = manifest.Songs.Concat(manifest.Clips).ToArray();
+            if (profile.RequiredIds.Any(id => !sounds.Any(s => s.OriginalId == id)) ||
+                profile.RequiredLoopIds.Any(id => !sounds.Any(s => s.OriginalId == id && s.Loop && s.LoopSeconds > 0 && s.LoopStart + s.LoopSeconds <= s.Seconds))) return false;
+            return identity is not null && identity.Complete && identity.GameId == profile.GameId && identity.Variant == profile.Variant &&
+                identity.ProfileId == profile.ProfileId && identity.ProfileVersion == profile.ProfileVersion &&
+                profile.RomSha1.Any(h => h.Equals(identity.RomSha1, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException) { return false; }
+    }
 
     /// <summary>Writes a profile.</summary>
     public static void Save(RomExtractionProfile profile, string path) =>
@@ -164,6 +256,13 @@ public sealed class ExtractionResult
     /// <summary>Library ready to be saved as <c>.msxaudio</c>.</summary>
     public Songs.MsxAudioLibrary Library { get; set; } = null!;
 
+    /// <summary>Per-ID capture validation, including skipped silent commands and capture limits.</summary>
+    public List<SoundCaptureDiagnostic> Diagnostics { get; set; } = new();
+
     /// <summary>Generated VGM files (id -> path).</summary>
     public Dictionary<int, string> VgmFiles { get; set; } = new();
 }
+
+/// <summary>Measured output of an individual driver request.</summary>
+public sealed record SoundCaptureDiagnostic(int Id, string Name, int Writes, float Peak, double Seconds, bool Silent, bool ReachedCaptureLimit,
+    string Termination = "unverified");

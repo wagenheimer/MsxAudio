@@ -191,7 +191,7 @@ Verified on the real cartridges:
 | `Vgm/VgmLoopFinder.cs` | loop detection on the recorded stream |
 | `Songs/MsxAudioLibrary.cs` | `.msxaudio` package (ZIP + manifest) |
 | `tools/MsxAudioTool/Program.cs` | CLI: `capture`, `scan`, `extract-direct`, `probe`, `rom-info`, `render` |
-| `tools/MsxAudioVisualizer/VisualizerGame.Extract.cs` | MSXScope dialog (F3) |
+| `tools/MSXScope/VisualizerGame.Extract.cs` | MSXScope dialog (F3) |
 | `profiles/` | curated per-game profiles |
 | `tests/Wagenheimer.MsxAudio.Tests/` | machine, mapper, scan and key-script tests |
 
@@ -212,3 +212,23 @@ Verified on the real cartridges:
    silence a game's own music, instead of asking for a profile.
 3. Rename scanned ids in the player (write the package back).
 4. Scan: jump-table entries and drivers copied to RAM; SRAM mappers (Hydlide 2, Xanadu).
+
+## King's Valley II isolated driver profiles (2026-11-23)
+
+`RomExtractionProfiles.FindForRom` selects embedded profiles by SHA-1. MSX1 and the validated MSX2 SCC patch have separate identities and package paths. `DirectRomExtractor` can initialize a driver without booting gameplay, restore bank mappings before every tick, copy authentic ROM routines to RAM, capture external-slot SCC state, and reset the machine for each sound ID. Cancellation is supported between ticks.
+
+Each capture is rendered to PCM before publication. Silent commands are excluded; diagnostics report audibility and capture limits. Required IDs/loops and a complete extraction identity protect game caches. Unverified names use `name:unverified`; bounded non-loop captures use `capture-limit:unresolved`. `Complete` means the configured full ID set was processed, not that every semantic name or sustained-effect endpoint is established.
+
+The current KV2 profiles yield 11 music entries and 46 audible effects each. Five driver IDs are silent. ID 55 remains a bounded sustained-effect capture; it has not been assigned a guessed semantic name. Loop recognition checks both write signatures and timing, but remains heuristic. Driver-state instrumentation is the next step for proving exact termination and loop boundaries. These results have not been certified against hardware.
+
+Known-ROM automatic scans in MSXScope use the curated isolated extractor instead of generic driver discovery. Unknown ROMs still require discovery and profile validation. The game uses only the in-process path and does not require openMSX.
+
+## Audio robustness follow-up — profile revision 5
+
+This supersedes the earlier KV2 limitation notes above. The complete table (IDs 1..65) is now probed: each validated variant produces 11 music entries and 48 audible effects, with six silent control/unused IDs recorded only in diagnostics. Previously excluded IDs 2 and 32 are included. All saved effects were checked through AUTO rendering, live MSXScope playback and the game playback engine.
+
+`DriverObservationOptions` lets a profile declare channel-activity bytes and complete sequencer RAM ranges. `DriverStateObserver` measures termination and requires three equal states at equal intervals to establish a cycle. KV2's full profiles require this evidence, rather than accepting a fixed duration or note-pattern heuristic. ID 55 is the sustained `ending_danger` effect (19/60 s cycle), and looping clips retain their loop metadata and play until stopped. Profile revision 5 invalidates older caches.
+
+AUTO no longer removes channels just because their activity lasts less than 0.4 seconds, and it accounts for held notes after the final write. MSXScope displays short durations in milliseconds and plays declared loops at their actual boundary without resetting chip state. Its repeated-event timeline advances forwards. Tests cover short PSG/SCC effects, repeated playback and sustained-effect stopping.
+
+Naming was checked against callers in [0xe1f/KingsValley2](https://github.com/0xe1f/KingsValley2), commit `8ba9be9be9dd92de729c9f4e236b193ed3dc4676`. Some source comments disagree with callers, so thunk comments were not accepted blindly. Unused entries keep explicit technical names. This is not hardware-certified audio equivalence.

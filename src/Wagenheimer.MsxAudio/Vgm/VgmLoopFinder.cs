@@ -78,8 +78,10 @@ public static class VgmLoopFinder
                 if (signature[start] != signature[start + k])
                     continue;
 
+                long candidatePeriod = times[start + k] - times[start];
                 int run = 0;
-                while (start + run + k < n && signature[start + run] == signature[start + run + k])
+                while (start + run + k < n && signature[start + run] == signature[start + run + k] &&
+                       Math.Abs(times[start + run + k] - times[start + run] - candidatePeriod) <= 735)
                     run++;
 
                 if (run < 2) continue;

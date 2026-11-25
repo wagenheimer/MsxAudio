@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>MSXScope</AssemblyName>
+    <RootNamespace>Wagenheimer.MsxAudio.Scope</RootNamespace>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+    <Description>MSXScope - VGM player and chip analyser for the Wagenheimer.MsxAudio package (PSG + SCC).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="icon.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\profiles\*.json" Link="profiles\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*" />
+    <PackageReference Include="MinVer" Version="6.0.0" PrivateAssets="all" />
+    <PackageReference Include="NAudio.Lame" Version="2.1.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerMinimumMajorMinor>1.0</MinVerMinimumMajorMinor>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Wagenheimer.MsxAudio\Wagenheimer.MsxAudio.csproj" />
+  </ItemGroup>
+
+</Project>

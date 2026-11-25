@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -55,6 +55,9 @@ public sealed class MsxAudioManifest
 
     /// <summary>Origin (ROM, VGM, emulator...).</summary>
     public string? Source { get; set; }
+
+    /// <summary>Optional stable game, variant and extraction provenance.</summary>
+    public MsxAudioIdentity? Identity { get; set; }
 
     /// <summary>PSG clock in Hz.</summary>
     public double PsgClock { get; set; } = 1789772.5;
@@ -179,14 +182,18 @@ public sealed class MsxAudioLibrary : IDisposable
             Id = id,
             Name = name,
             Music = false,
-            Loop = false,
+            Loop = vgm.HasLoop,
+            LoopStart = vgm.LoopStartSeconds,
+            LoopSeconds = vgm.LoopSeconds,
             Seconds = vgm.TotalSeconds,
             OriginalId = originalId,
             Tags = tags,
             Entry = $"clips/{Sanitize(id)}.vgm",
         };
 
-        _entries[clip.Entry] = VgmWriter.Write(vgm);
+        _entries[clip.Entry] = VgmWriter.Write(vgm,
+            loopStartSeconds: clip.Loop ? clip.LoopStart : null,
+            loopSeconds: clip.Loop ? clip.LoopSeconds : null);
         _loaded[clip.Entry] = vgm;
         Manifest.Clips.Add(clip);
         return clip;
@@ -232,8 +239,21 @@ public sealed class MsxAudioLibrary : IDisposable
         string? directory = Path.GetDirectoryName(Path.GetFullPath(path));
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
 
-        using var stream = File.Create(path);
-        Save(stream);
+        string destination = Path.GetFullPath(path);
+        string temporary = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                Save(stream);
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temporary, destination, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
     }
 
     /// <summary>Saves the package to a stream (ZIP format).</summary>
@@ -280,6 +300,7 @@ public sealed class MsxAudioLibrary : IDisposable
                 library.Manifest.Format = manifest.Format;
                 library.Manifest.Title = manifest.Title;
                 library.Manifest.Source = manifest.Source;
+                library.Manifest.Identity = manifest.Identity;
                 library.Manifest.PsgClock = manifest.PsgClock;
                 library.Manifest.SccClock = manifest.SccClock;
                 library.Manifest.Songs = manifest.Songs ?? new List<MsxAudioSong>();

@@ -16,6 +16,24 @@ public class MsxAudioPlaybackTests
     private const double Clock = 1789772.5;
 
     [Fact]
+    public void SustainedEffectKeepsItsLoopAndStopsOnlyWhenRequested()
+    {
+        using var library = new MsxAudioLibrary("sustained");
+        var vgm = BuildTone(totalSeconds: 0.3, loopStart: 0.1, loopSeconds: 0.2);
+        vgm.SetLoop(0.1, 0.2);
+        var clip = library.AddClip("effect", "Effect", vgm);
+        Assert.True(clip.Loop);
+        using var engine = new MsxAudioEngine(library, AudioProfile.Original, 8000);
+        engine.PlaySample("effect");
+        var buffer = new float[1600 * 2];
+        for (int i = 0; i < 10; i++) engine.Render(buffer, 1600);
+        Assert.Contains(buffer, value => Math.Abs(value) > 0.001f);
+        engine.StopSample("effect");
+        engine.Render(buffer, 1600);
+        Assert.All(buffer, value => Assert.Equal(0f, value));
+    }
+
+    [Fact]
     public void Library_RemoveAndRenameSurviveASaveAndLoad()
     {
         var library = new MsxAudioLibrary("pack");

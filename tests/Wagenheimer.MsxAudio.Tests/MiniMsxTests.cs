@@ -18,6 +18,43 @@ public class MiniMsxTests
 
     public MiniMsxTests(ITestOutputHelper output) => _output = output;
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SccMirrorsAndTestRegisterKeepTheirHardwareMeaning(bool external)
+    {
+        var machine = new MiniMsx(BuildRom(), RomMapper.KonamiScc) { ExternalSccSlot = external ? 2 : -1 };
+        if (external) machine.WritePort(0xA8, 0xE4);
+        machine.Write(0x97FF, 0x3F); // mirrored enable register
+        machine.Write(0x9890, 0x55); // mirrored frequency register 0
+        machine.Write(0x98E0, 0x20); // test/deformation, never wave RAM
+        Assert.Contains(machine.CapturedEvents, e => e.Kind == VgmEventKind.Scc && e.P0 == 1 && e.P1 == 0 && e.P2 == 0x55);
+        Assert.Contains(machine.CapturedEvents, e => e.Kind == VgmEventKind.Scc && e.P0 == 5 && e.P1 == 0 && e.P2 == 0x20);
+        Assert.DoesNotContain(machine.CapturedEvents, e => e.Kind == VgmEventKind.Scc && e.P0 == 0);
+    }
+
+    [Fact]
+    public void ExternalSccSlotCapturesWritesWithoutRemappingTheGameCartridge()
+    {
+        var machine = new MiniMsx(BuildRom(), RomMapper.KonamiScc) { ExternalSccSlot = 2 };
+        machine.WritePort(0xA8, 0xE4); // BIOS, game cartridge, external SCC, RAM
+        machine.Write(0x9000, 0x3F);
+        machine.Write(0x9804, 0x55);
+        Assert.Contains(machine.CapturedEvents, e => e.Kind == VgmEventKind.Scc && e.P0 == 0 && e.P1 == 4 && e.P2 == 0x55);
+        machine.WritePort(0xA8, 0xD4); // restore game in page 2
+        Assert.NotEqual(0x3F, machine.SaveBanks()[2]);
+    }
+
+    [Fact]
+    public void CaptureSnapshotPreservesWaveformsAndMixerWrittenBeforeTheSound()
+    {
+        var machine = new MiniMsx(BuildRom(), RomMapper.KonamiScc);
+        machine.Boot();
+        machine.ResetCapture(includeChipState: true);
+        Assert.Contains(machine.CapturedEvents, e => e.Sample == 0 && e.Kind == VgmEventKind.Scc && e.P1 == 4 && e.P2 == 0x0A);
+        Assert.Contains(machine.CapturedEvents, e => e.Sample == 0 && e.Kind == VgmEventKind.Psg && e.P0 == 7 && e.P1 == 0x3E);
+    }
+
     [Fact]
     public void Boot_RunsInitAndCapturesPsgAndSccWrites()
     {

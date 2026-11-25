@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Konamiman.Z80dotNet;
@@ -58,6 +58,10 @@ public sealed class MiniMsx
     private readonly byte[] _ram = new byte[0x10000];
     private readonly byte[] _bios = new byte[0x4000];
     private readonly byte[] _psgRegisters = new byte[16];
+    private readonly Dictionary<(byte Port, byte Register), byte> _sccState = new();
+    private byte _externalSccBank;
+    /// <summary>Optional separate SCC cartridge primary slot (2), disabled by default. Game ROM remains in slot 1.</summary>
+    public int ExternalSccSlot { get; set; } = -1;
     private readonly Cartridge _cartridge;
     private readonly Z80Processor _cpu = new();
     private readonly Z80Processor _isrCpu = new();
@@ -603,12 +607,21 @@ public sealed class MiniMsx
     }
 
     /// <summary>Clears the captured writes (start of a new song).</summary>
-    public void ResetCapture()
+    public void ResetCapture(bool includeChipState = false)
     {
         _events.Clear();
         _sample = 0;
         _tStatesAtBase = _tStates;
         PitchWriteCount = 0;
+        if (includeChipState)
+        {
+            if (CapturePsg)
+                for (int register = 0; register <= 13; register++)
+                    _events.Add(new VgmEvent(0, VgmEventKind.Psg, (byte)register, _psgRegisters[register], 0));
+            if (CaptureScc)
+                foreach (var pair in _sccState.OrderBy(p => p.Key.Port).ThenBy(p => p.Key.Register))
+                    _events.Add(new VgmEvent(0, VgmEventKind.Scc, pair.Key.Port, pair.Key.Register, pair.Value));
+        }
     }
 
     /// <summary>
@@ -1033,6 +1046,13 @@ public sealed class MiniMsx
     {
         int a = address;
 
+        if (slot == ExternalSccSlot && slot == 2)
+        {
+            if ((a & 0xF800) == 0x9000) _externalSccBank = value;
+            else if (a >= 0x9800 && a < 0xA000 && (_externalSccBank & 0x3F) == 0x3F)
+                CaptureSccRegister(a & 0xFF, value);
+            return;
+        }
         if (slot == 3)
         {
             if (TraceWrites && a >= 0xF000) Trace.Add(((ushort)a, value));
@@ -1099,27 +1119,19 @@ public sealed class MiniMsx
     /// <summary>Konami SCC register write (memory mapped at 0x9800-0x98FF).</summary>
     private void CaptureSccRegister(int register, byte value)
     {
-        if (!CaptureScc)
-            return;
-
-        int sample = Stamp();
-
-        if (register < 0x80)
-            _events.Add(new VgmEvent(sample, VgmEventKind.Scc, 0, (byte)register, value));
-        else if (register < 0x8A)
-        {
-            _events.Add(new VgmEvent(sample, VgmEventKind.Scc, 1, (byte)(register - 0x80), value));
-            PitchWriteCount++;
-        }
-        else if (register < 0x8F)
-            _events.Add(new VgmEvent(sample, VgmEventKind.Scc, 2, (byte)(register - 0x8A), value));
-        else if (register == 0x8F)
-        {
-            _events.Add(new VgmEvent(sample, VgmEventKind.Scc, 3, 0, value));
-            PitchWriteCount++;
-        }
-        else if (register >= 0xE0)
-            _events.Add(new VgmEvent(sample, VgmEventKind.Scc, 0, (byte)(0x60 + (register - 0xE0)), value));
+        // The frequency/volume/enable block is mirrored at 0x90..0x9F.
+        if (register is >= 0x90 and < 0xA0) register -= 0x10;
+        byte port, index;
+        if (register < 0x80) { port = 0; index = (byte)register; }
+        else if (register < 0x8A) { port = 1; index = (byte)(register - 0x80); }
+        else if (register < 0x8F) { port = 2; index = (byte)(register - 0x8A); }
+        else if (register == 0x8F) { port = 3; index = 0; }
+        else if (register >= 0xE0) { port = 5; index = 0; }
+        else return;
+        _sccState[(port, index)] = value;
+        if (!CaptureScc) return;
+        _events.Add(new VgmEvent(Stamp(), VgmEventKind.Scc, port, index, value));
+        if (port is 1 or 3) PitchWriteCount++;
     }
 
     /// <summary>Keyboard column read (PPI port B): the row chosen in port C, 0 = pressed.</summary>

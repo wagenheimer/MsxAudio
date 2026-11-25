@@ -33,6 +33,8 @@ public static class OpenMsxRomExtractor
             throw new FileNotFoundException("ROM not found", options.RomPath);
 
         RomExtractionProfile profile = options.Profile;
+        string resolvedRom = RomFile.Resolve(options.RomPath);
+        var identity = ExtractionIdentity.Create(profile, File.ReadAllBytes(resolvedRom));
         string work = Path.GetFullPath(options.WorkDirectory);
         string vgmDirectory = Path.Combine(work, "vgm");
         string dumpDirectory = Path.Combine(work, "dump");
@@ -51,7 +53,7 @@ public static class OpenMsxRomExtractor
         startInfo.ArgumentList.Add("-machine");
         startInfo.ArgumentList.Add(profile.Machine);
         startInfo.ArgumentList.Add("-cart");
-        startInfo.ArgumentList.Add(Path.GetFullPath(options.RomPath));
+        startInfo.ArgumentList.Add(Path.GetFullPath(resolvedRom));
         if (!string.IsNullOrWhiteSpace(profile.RomType))
         {
             startInfo.ArgumentList.Add("-romtype");
@@ -73,6 +75,7 @@ public static class OpenMsxRomExtractor
 
         // import the recorded VGMs
         var library = new MsxAudioLibrary(profile.Name);
+        library.Manifest.Identity = identity;
         library.Manifest.Source = $"openMSX ({Path.GetFileName(options.RomPath)})";
         var files = new Dictionary<int, string>();
         var names = new Dictionary<string, string>();
