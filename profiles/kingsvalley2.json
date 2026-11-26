@@ -2,7 +2,8 @@
   "name": "King's Valley II",
   "romSha1": [
     "cfd872d005b7bd4cdd6e06c4c0162191f0b0415d",
-    "cb612cbfdf79dabe55164b386ca956a3e187bef7"
+    "cb612cbfdf79dabe55164b386ca956a3e187bef7",
+    "7f6c5ec94d35981547a277c308ea9c2d2ab92e0f"
   ],
   "machine": "C-BIOS_MSX2_JP",
   "soundCallAddress": 24579,

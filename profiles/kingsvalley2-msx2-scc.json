@@ -1,7 +1,13 @@
 {
   "name": "King's Valley II",
   "romSha1": [
-    "0c7e0b618c72e7ca08bd756c3103b46e5c580c04"
+    "0c7e0b618c72e7ca08bd756c3103b46e5c580c04",
+    "5ec8811254dc762c6852289a08acf22954404f0d",
+    "b5acea41aeabb5daa4183953f800d47db0c39fb5",
+    "89d96d4b92d9a1c220cae0240cf0c00f310d14aa",
+    "22704b82d159d963f1192d7a81810aa2be8b6042",
+    "9ef68fecc91bf5066b9eb9a796412ab00e5746bf",
+    "fa750d3f622717fd1dfd0b2740fe69b49ba62ac8"
   ],
   "machine": "C-BIOS_MSX2_JP",
   "soundCallAddress": 24579,

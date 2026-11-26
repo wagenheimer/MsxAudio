@@ -176,16 +176,21 @@ public static class RomExtractionProfiles
 
     /// <summary>Returns a fresh curated profile for a specific game and cartridge variant.</summary>
     public static RomExtractionProfile? FindByGameVariant(string gameId, string variant)
+        => FindAllByGameVariant(gameId, variant).OrderByDescending(profile => profile.RomSha1.Count).FirstOrDefault();
+
+    /// <summary>Returns every hardware recipe belonging to a game variant, including mapper conversions.</summary>
+    public static IReadOnlyList<RomExtractionProfile> FindAllByGameVariant(string gameId, string variant)
     {
+        var profiles = new List<RomExtractionProfile>();
         var assembly = typeof(RomExtractionProfiles).Assembly;
         foreach (string resource in assembly.GetManifestResourceNames().OrderBy(n => n, StringComparer.Ordinal))
         {
             if (!resource.StartsWith("MsxAudio.Profiles.", StringComparison.Ordinal)) continue;
             using var stream = assembly.GetManifestResourceStream(resource)!;
             var profile = System.Text.Json.JsonSerializer.Deserialize<RomExtractionProfile>(stream, Options);
-            if (profile?.GameId == gameId && profile.Variant == variant) return profile;
+            if (profile?.GameId == gameId && profile.Variant == variant) profiles.Add(profile);
         }
-        return null;
+        return profiles;
     }
 
     /// <summary>Finds a curated embedded profile by the hash of the resolved ROM bytes.</summary>

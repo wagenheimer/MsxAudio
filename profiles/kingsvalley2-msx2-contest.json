@@ -2,7 +2,9 @@
   "name": "King's Valley II - Edit Contest",
   "romSha1": [
     "4a157e6e217f6af4ab3dec5d7dd5188e5cef7954",
-    "e7b0a7b083d2f5bb12fb4ea6b2e822ee6330a15e"
+    "e7b0a7b083d2f5bb12fb4ea6b2e822ee6330a15e",
+    "2e0436303648097e8e936c5467574aff5e3f1517",
+    "376b4785cab7d60cc083f0c03bd5e8ea2fee8205"
   ],
   "machine": "C-BIOS_MSX2_JP",
   "soundCallAddress": 24579,
