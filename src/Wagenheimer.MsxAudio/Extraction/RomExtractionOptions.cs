@@ -204,7 +204,7 @@ public static class RomExtractionProfiles
     }
 
     /// <summary>Checks source and profile revision before reusing a published extraction.</summary>
-    public static bool IsCurrentPackage(string path, RomExtractionProfile profile)
+    public static bool IsCurrentPackage(string path, RomExtractionProfile profile, string? expectedRomSha1 = null)
     {
         try
         {
@@ -215,7 +215,8 @@ public static class RomExtractionProfiles
                 profile.RequiredLoopIds.Any(id => !sounds.Any(s => s.OriginalId == id && s.Loop && s.LoopSeconds > 0 && s.LoopStart + s.LoopSeconds <= s.Seconds))) return false;
             return identity is not null && identity.Complete && identity.GameId == profile.GameId && identity.Variant == profile.Variant &&
                 identity.ProfileId == profile.ProfileId && identity.ProfileVersion == profile.ProfileVersion &&
-                profile.RomSha1.Any(h => h.Equals(identity.RomSha1, StringComparison.OrdinalIgnoreCase));
+                profile.RomSha1.Any(h => h.Equals(identity.RomSha1, StringComparison.OrdinalIgnoreCase)) &&
+                (expectedRomSha1 == null || expectedRomSha1.Equals(identity.RomSha1, StringComparison.OrdinalIgnoreCase));
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException) { return false; }
     }
